@@ -15,9 +15,6 @@ impl AdminActions {
     pub fn admin_panel_link_for_workspace() -> String {
         format!("{}/admin", ChannelState::server_root_url())
     }
-    pub fn workspace_teams_admin_panel_link() -> String {
-        format!("{}/admin/workspace/teams", ChannelState::server_root_url())
-    }
 
     /// Open the admin panel for a specific team
     pub fn open_admin_panel(team_uid: ServerId, ctx: &mut AppContext) {
@@ -33,11 +30,6 @@ impl AdminActions {
     /// Open the support email link
     pub fn contact_support(ctx: &mut AppContext) {
         ctx.open_url("mailto:support@warp.dev");
-    }
-
-    /// Open the contact sales page
-    pub fn contact_sales(ctx: &mut AppContext) {
-        ctx.open_url("https://warp.dev/contact-sales");
     }
 }
 

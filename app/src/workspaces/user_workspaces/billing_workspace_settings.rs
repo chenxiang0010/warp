@@ -179,16 +179,10 @@ impl UserWorkspaces {
     }
 
     /// Whether custom inference endpoints are enabled for the current user.
-    /// Anonymous or logged-out users are not allowed to use custom inference.
-    /// Controlled by the BYO_ENDPOINT billing policy.
-    pub fn is_byo_endpoint_enabled(&self, app: &AppContext) -> bool {
-        if AuthStateProvider::as_ref(app)
-            .get()
-            .is_anonymous_or_logged_out()
-        {
-            return false;
-        }
-
+    /// Custom endpoints are the only model source in this build, so they remain
+    /// available without a Warp account. Controlled by the BYO_ENDPOINT billing
+    /// policy when a workspace is present.
+    pub fn is_byo_endpoint_enabled(&self) -> bool {
         self.current_workspace()
             .map(|workspace| workspace.billing_metadata.is_byo_endpoint_enabled())
             .unwrap_or(true)

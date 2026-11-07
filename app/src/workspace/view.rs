@@ -413,7 +413,6 @@ use crate::terminal::model::terminal_model::ConversationTranscriptViewerStatus;
 use crate::terminal::resizable_data::{
     DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_RIGHT_PANEL_WIDTH, ModalSizes, ModalType, ResizableData,
 };
-use crate::terminal::safe_mode_settings::SafeModeSettings;
 use crate::terminal::session_settings::{
     NewSessionSource, NotificationsMode, NotificationsSettings, SessionSettings,
     SessionSettingsChangedEvent, WorkingDirectoryMode,
@@ -547,7 +546,6 @@ use crate::workspace::view::right_panel::{RightPanelEvent, RightPanelView};
 use crate::workspace::{ForkFromExchange, ForkedConversationDestination};
 use crate::workspaces::update_manager::TeamUpdateManager;
 use crate::workspaces::user_workspaces::{ResolvedTeamScope, UserWorkspaces};
-use crate::workspaces::workspace::AdminEnablementSetting;
 use crate::{
     AgentNotificationsModel, BlocklistAIHistoryModel, GlobalResourceHandles, TelemetryEvent,
     autoupdate, send_telemetry_from_ctx, settings,
@@ -608,20 +606,16 @@ const TEAM_SWITCHER_DOT_ALPHA: u8 = 204;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TeamNavigationMode {
     Hidden,
-    BrowseTeams,
     TeamSwitcher,
 }
 
 fn team_navigation_mode(
     has_current_team: bool,
-    has_teams: bool,
     can_switch_teams: bool,
     has_joinable_teams: bool,
 ) -> TeamNavigationMode {
     if has_current_team && (can_switch_teams || has_joinable_teams) {
         TeamNavigationMode::TeamSwitcher
-    } else if !has_teams && has_joinable_teams {
-        TeamNavigationMode::BrowseTeams
     } else {
         TeamNavigationMode::Hidden
     }
@@ -3370,8 +3364,8 @@ impl Workspace {
                         .is_shared_objects_creation_denied_modal_open = false;
                     ctx.notify();
                 }
-                SharedObjectsCreationDeniedModalEvent::TeamSettings => {
-                    me.show_settings_with_section(Some(SettingsSection::Teams), ctx);
+                SharedObjectsCreationDeniedModalEvent::BillingAndUsage => {
+                    me.show_settings_with_section(Some(SettingsSection::BillingAndUsage), ctx);
                     me.current_workspace_state
                         .is_shared_objects_creation_denied_modal_open = false;
                     ctx.notify();
@@ -6335,20 +6329,7 @@ impl Workspace {
             return;
         }
         let current_team_uid = user_workspaces.team_uid_for_window(window_id);
-        let mut items = team_switcher_menu_items(&workspace.teams, current_team_uid);
-        if joinable_team_count > 0 {
-            items.push(MenuItem::Separator);
-            items.push(
-                MenuItemFields::new("Browse teams")
-                    .with_icon(icons::Icon::Search)
-                    .with_right_side_label(
-                        format!("{joinable_team_count} available"),
-                        Properties::default(),
-                    )
-                    .with_on_select_action(WorkspaceAction::BrowseTeams)
-                    .into_item(),
-            );
-        }
+        let items = team_switcher_menu_items(&workspace.teams, current_team_uid);
         self.team_switcher_menu
             .update(ctx, |menu, ctx| menu.set_items(items, ctx));
         self.show_team_switcher_menu = true;
@@ -6371,7 +6352,6 @@ impl Workspace {
             });
         let mode = team_navigation_mode(
             current_team.is_some(),
-            user_workspaces.has_teams(),
             user_workspaces.can_switch_teams(),
             has_joinable_teams,
         );
@@ -6381,11 +6361,6 @@ impl Workspace {
         let pill_bg_hover = internal_colors::fg_overlay_2(theme);
         let (label, dot_color, action) = match mode {
             TeamNavigationMode::Hidden => return None,
-            TeamNavigationMode::BrowseTeams => (
-                "Browse teams".to_string(),
-                None,
-                WorkspaceAction::BrowseTeams,
-            ),
             TeamNavigationMode::TeamSwitcher => {
                 let current_team = current_team?;
                 let mut dot_color = current_team
@@ -7003,7 +6978,10 @@ impl Workspace {
                 #[cfg(feature = "local_tty")]
                 if FeatureFlag::ShellSelector.is_enabled() {
                     AvailableShells::handle(ctx).read(ctx, |model, _| {
-                        for shell in model.get_available_shells() {
+                        for shell in model
+                            .get_available_shells()
+                            .filter(|shell| shell.selector_visible())
+                        {
                             let shell_name = model.display_name_for_shell(shell);
                             let icon = shell
                                 .get_valid_shell_path_and_type()
@@ -10119,12 +10097,6 @@ impl Workspace {
                     .into_item(),
             );
         }
-
-        items.push(
-            MenuItemFields::new("Invite a friend")
-                .with_on_select_action(WorkspaceAction::ShowReferralSettingsPage)
-                .into_item(),
-        );
 
         if !self.auth_state.is_anonymous_or_logged_out() {
             items.push(
@@ -15422,21 +15394,6 @@ impl Workspace {
         ctx: &mut ViewContext<Self>,
     ) {
         match event {
-            SettingsViewEvent::CheckForUpdate => {
-                self.manual_check_for_update(ctx);
-            }
-            SettingsViewEvent::LaunchNetworkLogging => {
-                self.open_network_log_pane(ctx);
-            }
-            SettingsViewEvent::OpenWarpDrive => {
-                self.close_all_overlays(ctx);
-                self.open_or_toggle_warp_drive(
-                    false, /* toggle */
-                    false, /* explicit_user_action */
-                    ctx,
-                );
-                ctx.notify();
-            }
             SettingsViewEvent::SignupAnonymousUser => {
                 self.initiate_user_signup(AnonymousUserSignupEntrypoint::SignUpButton, ctx);
             }
@@ -17792,33 +17749,24 @@ impl Workspace {
         match pane_group_handle.as_ref(ctx).active_session_view(ctx) {
             Some(terminal_handle) => {
                 #[cfg_attr(not(feature = "local_fs"), allow(unused_variables))]
-                let (
-                    session,
-                    pwd_location,
-                    path_if_local,
-                    is_local,
-                    is_wsl_session,
-                    session_id,
-                    has_pending_ssh,
-                ) = terminal_handle.read(ctx, |terminal, ctx| {
-                    let active_session_id = terminal.active_block_session_id();
-                    let session = active_session_id
-                        .and_then(|id| terminal.sessions_model().as_ref(ctx).get(id));
-                    let pwd_location = terminal.pwd_as_local_or_remote(ctx);
-                    let path_if_local = terminal.active_session_path_if_local(ctx);
-                    let is_local = terminal.active_session_is_local(ctx);
-                    let is_wsl_session = session.as_ref().map(|s| s.is_wsl()).unwrap_or(false);
-                    let has_pending_ssh = terminal.has_pending_ssh_command();
-                    (
-                        session,
-                        pwd_location,
-                        path_if_local,
-                        is_local,
-                        is_wsl_session,
-                        active_session_id,
-                        has_pending_ssh,
-                    )
-                });
+                let (session, pwd_location, path_if_local, is_local, session_id, has_pending_ssh) =
+                    terminal_handle.read(ctx, |terminal, ctx| {
+                        let active_session_id = terminal.active_block_session_id();
+                        let session = active_session_id
+                            .and_then(|id| terminal.sessions_model().as_ref(ctx).get(id));
+                        let pwd_location = terminal.pwd_as_local_or_remote(ctx);
+                        let path_if_local = terminal.active_session_path_if_local(ctx);
+                        let is_local = terminal.active_session_is_local(ctx);
+                        let has_pending_ssh = terminal.has_pending_ssh_command();
+                        (
+                            session,
+                            pwd_location,
+                            path_if_local,
+                            is_local,
+                            active_session_id,
+                            has_pending_ssh,
+                        )
+                    });
 
                 let window_id = ctx.window_id();
                 let working_directory_clone = path_if_local.clone();
@@ -17839,7 +17787,10 @@ impl Workspace {
                 });
 
                 let is_remote = matches!(is_local, Some(false));
-                let is_unsupported_session = is_wsl_session;
+                // WSL distributions run locally and their working directories are exposed to
+                // Windows as UNC paths (`\\wsl$\<distro>\...`), which the local file tree can
+                // read, so they are not an unsupported session.
+                let is_unsupported_session = false;
 
                 // Check whether this remote session has an active remote server
                 // connection (or is in the process of connecting). This is only
@@ -17878,7 +17829,7 @@ impl Workspace {
                 #[cfg(feature = "local_fs")]
                 {
                     self.right_panel_view.update(ctx, |right_panel, ctx| {
-                        right_panel.update_session_env(is_remote, is_wsl_session, ctx);
+                        right_panel.update_session_env(is_remote, ctx);
                     });
 
                     // Code review panel setup is handled by the RepositoriesChanged
@@ -17902,7 +17853,7 @@ impl Workspace {
                 #[cfg(feature = "local_fs")]
                 {
                     self.right_panel_view.update(ctx, |right_panel, ctx| {
-                        right_panel.update_session_env(false, false, ctx);
+                        right_panel.update_session_env(false, ctx);
                     });
                 }
             }
@@ -17928,9 +17879,6 @@ impl Workspace {
                     *in_subshell,
                     ctx,
                 );
-            }
-            DrivePanelEvent::OpenTeamSettingsPage => {
-                self.show_settings_with_section(Some(SettingsSection::Teams), ctx);
             }
             DrivePanelEvent::OpenImportModal {
                 owner,
@@ -18971,32 +18919,6 @@ impl Workspace {
         self.close_all_overlays(ctx);
         self.open_settings_pane(section, Some(search_query), ctx);
     }
-    fn browse_teams(&mut self, ctx: &mut ViewContext<Self>) {
-        let show_join_modal = UserWorkspaces::as_ref(ctx)
-            .team_for_window(self.window_id)
-            .is_some();
-        self.show_settings_with_section(Some(SettingsSection::Teams), ctx);
-        if show_join_modal {
-            self.settings_pane.update(ctx, |view, ctx| {
-                view.open_teams_page_join_modal(ctx);
-            });
-        }
-    }
-
-    /// Opens the team settings page and fills the invite field with the given email. This is used when linking directing to
-    /// settings with the intent of inviting a user.
-    pub fn show_team_settings_page_with_email_invite(
-        &mut self,
-        email_invite: Option<&String>,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        self.show_settings_with_section(Some(SettingsSection::Teams), ctx);
-
-        self.settings_pane.update(ctx, |view, ctx| {
-            view.open_teams_page_email_invite(email_invite, ctx);
-        });
-    }
-
     /// Opens the MCP servers settings page, optionally triggering auto-install of a gallery MCP.
     pub fn open_mcp_servers_page(
         &mut self,
@@ -23236,12 +23158,10 @@ impl Workspace {
     }
 
     fn add_toggle_setting_context_flags(&self, app: &AppContext, context: &mut Context) {
-        let privacy_settings = PrivacySettings::as_ref(app);
         let editor_settings = AppEditorSettings::as_ref(app);
         let semantic_selection_settings = SemanticSelection::as_ref(app);
         let selection_settings = SelectionSettings::as_ref(app);
         let session_settings = SessionSettings::as_ref(app);
-        let safe_mode_settings: &SafeModeSettings = SafeModeSettings::as_ref(app);
         let block_list_settings = BlockListSettings::as_ref(app);
         let tab_settings = TabSettings::as_ref(app);
         let alias_expansion_settings = AliasExpansionSettings::as_ref(app);
@@ -23390,10 +23310,6 @@ impl Workspace {
             context.set.insert(flags::SYNTAX_HIGHLIGHTING_FLAG);
         }
 
-        if privacy_settings.is_telemetry_enabled {
-            context.set.insert(flags::TELEMETRY_FLAG);
-        }
-
         let cloud_preferences_settings = CloudPreferencesSettings::as_ref(app);
         if *cloud_preferences_settings.settings_sync_enabled.value() {
             context.set.insert(flags::SETTINGS_SYNC_FLAG);
@@ -23410,27 +23326,6 @@ impl Workspace {
 
         if *block_list_settings.show_block_dividers.value() {
             context.set.insert(flags::BLOCK_DIVIDERS_CONTEXT_FLAG);
-        }
-
-        if *safe_mode_settings.safe_mode_enabled.value() {
-            context.set.insert(flags::SAFE_MODE_FLAG);
-        }
-        if !privacy_settings.is_telemetry_force_enabled()
-            && matches!(
-                UserWorkspaces::as_ref(app).get_cloud_conversation_storage_enablement_setting(),
-                AdminEnablementSetting::RespectUserSetting
-            )
-        {
-            context
-                .set
-                .insert(flags::CLOUD_CONVERSATION_STORAGE_EDITABLE_FLAG);
-        }
-        if privacy_settings.is_cloud_conversation_storage_enabled {
-            context.set.insert(flags::CLOUD_CONVERSATION_STORAGE_FLAG);
-        }
-
-        if privacy_settings.is_crash_reporting_enabled {
-            context.set.insert(flags::CRASH_REPORTING_FLAG);
         }
 
         if editor_settings.cursor_blink.value() == &CursorBlink::Enabled {
@@ -24718,9 +24613,6 @@ impl TypedActionView for Workspace {
                 };
 
                 ctx.open_url(&upgrade_url);
-            }
-            ShowReferralSettingsPage => {
-                self.show_settings_with_section(Some(SettingsSection::Referrals), ctx);
             }
             JoinSlack => self.join_slack(ctx),
             ViewUserDocs => self.view_user_docs(ctx),
@@ -26685,9 +26577,6 @@ impl TypedActionView for Workspace {
                         );
                     }
                 }
-            }
-            BrowseTeams => {
-                self.browse_teams(ctx);
             }
             ShowTeamSwitcherMenu => {
                 self.show_team_switcher_dropdown(ctx);

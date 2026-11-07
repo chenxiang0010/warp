@@ -21,7 +21,7 @@ PageType::new_monolith(widget, Some("Billing and Usage"), /* is_dual_scrollable 
 
 - **`Uncategorized`** — a flat list of widgets. The common shape.
 - **`Categorized`** — widgets grouped under `Category`s, each with a subheader (rendered via `render_sub_header`) and an optional subtitle.
-- **`Monolith`** — the whole page is a single widget because its content can't be split for search (Keybindings, Teams, About, Environments).
+- **`Monolith`** — the whole page is a single widget because its content can't be split for search (Keybindings, About).
 
 Each widget implements `SettingsWidget` (`settings_page.rs`):
 
@@ -109,11 +109,11 @@ Getting this wrong in the first direction is bug class 1 below. Getting it wrong
 
 Classify the page before you write it:
 
-- **Single-topic page** — one heading names everything on it, but the content is still made of separately-matchable widgets. Knowledge, Third party CLI agents, Editor and Code Review, Account, Scripting. → **Title in the `PageType` slot.**
+- **Single-topic page** — one heading names everything on it, but the content is still made of separately-matchable widgets. Knowledge, Third party CLI agents, Editor and Code Review, Scripting. → **Title in the `PageType` slot.**
 - **Multi-section page** — several independent sections, each with its own heading. Warp Agent, Agent profiles, Appearance, Features. → **Per-section headings live in widgets/categories** and correctly disappear with their rows. (For `Categorized`, `get_filtered` drops categories whose widgets all filtered out, so their subheaders vanish automatically — that's the behavior you want.)
-- **Monolith page** — Keybindings, Teams, About, Environments, Codebase Indexing. There is no partial-match state: the sole widget either matches, and the whole page renders, or it doesn't, and the whole page renders empty and drops out of the sidebar. So a monolith can never strand an orphaned setting under a missing heading — it is **not** affected by bug class 1, but for that reason, *not* because its title is protected. Passing the title through the slot is still the tidier structure (Billing and Usage and Referrals do), just don't expect it to keep the title on screen during a non-matching search; on a monolith it will not. Codebase Indexing looks single-topic but is really one unfilterable widget covering the whole page (`CodePageWidget`, wrapped by `CodeIndexingPageWidget`) — building it as `Uncategorized` instead of `Monolith` made the sidebar show a permanent, misleading "(1)" on any match ([APP-5530]).
+- **Monolith page** — Keybindings, About, Codebase Indexing. There is no partial-match state: the sole widget either matches, and the whole page renders, or it doesn't, and the whole page renders empty and drops out of the sidebar. So a monolith can never strand an orphaned setting under a missing heading — it is **not** affected by bug class 1, but for that reason, *not* because its title is protected. Passing the title through the slot is still the tidier structure (Billing and Usage does), just don't expect it to keep the title on screen during a non-matching search; on a monolith it will not. Codebase Indexing looks single-topic but is really one unfilterable widget covering the whole page (`CodePageWidget`, wrapped by `CodeIndexingPageWidget`) — building it as `Uncategorized` instead of `Monolith` made the sidebar show a permanent, misleading "(1)" on any match ([APP-5530]).
 
-The two are not mutually exclusive: a page can name itself in the title slot **and** have per-section subheaders inside its widgets. Privacy does exactly that — `PageType::new_uncategorized(widgets, Some("Privacy"))` plus `render_sub_header` calls inside individual widgets. The rule is per heading, not per page.
+The two are not mutually exclusive: a page can name itself in the title slot **and** have per-section subheaders inside its widgets. The rule is per heading, not per page.
 
 Worked positive example: **Scripting** (`scripting_page.rs`) is a small page done right — two focused widgets (`WarpControlCliInstallWidget`, `LocalControlModeWidget`) with their own `search_terms`, and `PageType::new_uncategorized(widgets, Some("Scripting"))`. A ticket was once filed claiming Scripting needed splitting; it was canceled because the premise was wrong. A small page is not automatically a mega-widget.
 

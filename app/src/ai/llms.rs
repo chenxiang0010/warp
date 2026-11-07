@@ -1100,6 +1100,11 @@ impl LLMPreferences {
             .agent_mode
             .choices
             .iter()
+            // This build only surfaces models backed by user-defined custom endpoints.
+            // Server catalog entries are labelled with the first-party provider serving
+            // them, while `Unknown` covers both `auto` (a router over whatever is
+            // configured) and custom endpoints, so this keeps the picker non-empty.
+            .filter(|llm| llm.provider == LLMProvider::Unknown)
             // Gate cloud/team routers behind the same flag as local routers so
             // the entire custom-router feature is controlled by one flag.
             .filter(move |llm| {
@@ -1136,6 +1141,8 @@ impl LLMPreferences {
             .choices
             .iter()
             .filter(|llm| !matches!(llm.disable_reason, Some(DisableReason::AdminDisabled)))
+            // Custom-endpoint models only; see `get_base_llm_choices_for_agent_mode_for_team_uid`.
+            .filter(|llm| llm.provider == LLMProvider::Unknown)
             // Gate cloud/team routers behind the same flag as local routers.
             .filter(move |llm| {
                 routers_enabled || !custom_model_routers::is_cloud_custom_router_id(llm.id.as_str())
@@ -1155,6 +1162,8 @@ impl LLMPreferences {
             .choices
             .iter()
             .filter(|llm| !matches!(llm.disable_reason, Some(DisableReason::AdminDisabled)))
+            // Custom-endpoint models only; see `get_base_llm_choices_for_agent_mode_for_team_uid`.
+            .filter(|llm| llm.provider == LLMProvider::Unknown)
             .chain(self.custom_llm_choices(app))
     }
 
@@ -1407,7 +1416,7 @@ impl LLMPreferences {
     }
 
     fn custom_inference_enabled(app: &AppContext) -> bool {
-        UserWorkspaces::as_ref(app).is_byo_endpoint_enabled_for_any_team(app)
+        UserWorkspaces::as_ref(app).is_byo_endpoint_enabled_for_any_team()
     }
 
     /// Resolves a custom model router by its `config_key`/`LLMId`.

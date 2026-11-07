@@ -7,7 +7,6 @@ use warpui::ui_components::button::ButtonVariant;
 use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
 use warpui::{AppContext, Element, Entity, SingletonEntity, View, ViewContext};
 
-use crate::settings_view::SettingsSection;
 use crate::terminal::view::TerminalAction;
 use crate::ui_components::buttons::icon_button;
 use crate::ui_components::icons::Icon;
@@ -24,7 +23,6 @@ const PRIVACY_URL: &str = "https://warp.dev/privacy";
 pub struct TelemetryBanner {
     pub is_onboarded: bool,
     pub learn_more_mouse_state: MouseStateHandle,
-    pub privacy_settings_mouse_state: MouseStateHandle,
     pub close_button_mouse_state: MouseStateHandle,
 }
 
@@ -33,7 +31,6 @@ impl TelemetryBanner {
         Self {
             is_onboarded,
             learn_more_mouse_state: Default::default(),
-            privacy_settings_mouse_state: Default::default(),
             close_button_mouse_state: Default::default(),
         }
     }
@@ -121,32 +118,6 @@ impl View for TelemetryBanner {
                         .finish(),
                 )
                 .with_margin_right(4.)
-                .finish(),
-            )
-            .with_child(
-                Container::new(
-                    ui_builder
-                        .button(
-                            ButtonVariant::Outlined,
-                            self.privacy_settings_mouse_state.clone(),
-                        )
-                        .with_text_label("Manage privacy settings".into())
-                        .with_style(UiComponentStyles {
-                            ..Default::default()
-                        })
-                        .build()
-                        .on_click(|ctx, _, _| {
-                            ctx.dispatch_typed_action(WorkspaceAction::ShowSettingsPage(
-                                SettingsSection::Privacy,
-                            ));
-                            ctx.dispatch_typed_action(
-                                TerminalAction::HideTelemetryBannerPermanently,
-                            );
-                        })
-                        .finish(),
-                )
-                .with_margin_left(4.)
-                .with_margin_right(12.)
                 .finish(),
             )
             .with_child(

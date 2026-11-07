@@ -19,6 +19,12 @@ pub async fn generate_multi_agent_output(
     team_scope: RequestTeamScope,
     cancellation_rx: futures::channel::oneshot::Receiver<()>,
 ) -> Result<ResponseStream, ConvertToAPITypeError> {
+    // Custom endpoints are normally proxied by Warp's server, which requires an account.
+    // Without one, call the endpoint directly and drive the turn locally.
+    if let Some(endpoint) = super::local_endpoint::endpoint_for_request(&params) {
+        return super::local_endpoint::generate_local_output(endpoint, params, cancellation_rx);
+    }
+
     let supported_tools = params
         .supported_tools_override
         .take()

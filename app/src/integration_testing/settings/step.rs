@@ -9,6 +9,7 @@ use crate::settings_view::{
     SEARCH_EDITOR_POSITION_ID, SettingsAction, SettingsSection, nav_page_position_id,
     nav_subpage_position_id, nav_umbrella_position_id,
 };
+use crate::terminal::safe_mode_settings::SafeModeSettings;
 use crate::window_settings::WindowSettings;
 use crate::workspace::{Workspace, WorkspaceAction};
 
@@ -32,6 +33,34 @@ pub fn toggle_setting(action: SettingsAction) -> TestStep {
     new_step_with_default_assertions(&format!("Toggle setting: {action:?}")).with_action(
         move |app, _, _| {
             dispatch_workspace_action(app, WorkspaceAction::DispatchToSettingsTab(action.clone()));
+        },
+    )
+}
+
+/// Enables or disables secret redaction (safe mode) on the settings model.
+pub fn set_safe_mode(enabled: bool) -> TestStep {
+    new_step_with_default_assertions(&format!("Set safe mode to {enabled}")).with_action(
+        move |app, _, _| {
+            SafeModeSettings::handle(app).update(app, |settings, ctx| {
+                settings
+                    .safe_mode_enabled
+                    .set_value(enabled, ctx)
+                    .expect("failed to update safe mode setting");
+            });
+        },
+    )
+}
+
+/// Sets whether detected secrets are fully hidden in the block list.
+pub fn set_hide_secrets_in_block_list(enabled: bool) -> TestStep {
+    new_step_with_default_assertions(&format!("Set hide secrets to {enabled}")).with_action(
+        move |app, _, _| {
+            SafeModeSettings::handle(app).update(app, |settings, ctx| {
+                settings
+                    .hide_secrets_in_block_list
+                    .set_value(enabled, ctx)
+                    .expect("failed to update hide secrets setting");
+            });
         },
     )
 }

@@ -4270,10 +4270,7 @@ impl TerminalView {
         });
 
         let cloud_agent_team_required_view =
-            ctx.add_typed_action_view(ambient_agent::CloudAgentTeamRequiredView::new);
-        ctx.subscribe_to_view(&cloud_agent_team_required_view, |me, _, event, ctx| {
-            me.handle_cloud_agent_team_required_view_event(event, ctx);
-        });
+            ctx.add_view(|_| ambient_agent::CloudAgentTeamRequiredView::new());
 
         let environment_setup_mode_selector =
             ctx.add_typed_action_view(EnvironmentSetupModeSelector::new);
@@ -5031,18 +5028,6 @@ impl TerminalView {
             self.agent_view_controller.update(ctx, |controller, ctx| {
                 controller.exit_agent_view(ctx);
             });
-        }
-    }
-
-    fn handle_cloud_agent_team_required_view_event(
-        &mut self,
-        event: &ambient_agent::CloudAgentTeamRequiredViewEvent,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        match event {
-            ambient_agent::CloudAgentTeamRequiredViewEvent::OpenTeamsSettings => {
-                ctx.emit(Event::OpenSettings(SettingsSection::Teams));
-            }
         }
     }
 
@@ -12811,7 +12796,13 @@ impl TerminalView {
                     .is_some_and(|workspace| {
                         workspace.as_ref(ctx).is_inline_rename_editor_focused(ctx)
                     });
-                if !inline_rename_editor_is_focused {
+                // Don't take focus away from a command the user is already typing.
+                // Slow-booting sessions (notably WSL) surface the bootstrap block
+                // long after the input box has focus, and stealing focus here
+                // leaves the caret hidden and sends the next Enter to the terminal
+                // instead of executing the buffered command.
+                let input_has_draft = !self.input.as_ref(ctx).buffer_text(ctx).is_empty();
+                if !inline_rename_editor_is_focused && !input_has_draft {
                     self.focus_terminal(ctx);
                 }
             }
@@ -27865,7 +27856,6 @@ impl TypedActionView for TerminalView {
             | StartFileDropTarget
             | StopFileDropTarget
             | RunNativeShellCompletions { .. }
-            | OpenTeamSettingsPage
             | HideTelemetryBannerPermanently
             | GenerateCodebaseIndex
             | LoadAgentModeConversation
@@ -28505,9 +28495,6 @@ impl TypedActionView for TerminalView {
                     buffer_text: buffer_text.clone(),
                     results_tx: results_tx.clone(),
                 });
-            }
-            OpenTeamSettingsPage => {
-                ctx.emit(Event::OpenSettings(SettingsSection::Teams));
             }
             SetMarkedText {
                 marked_text,

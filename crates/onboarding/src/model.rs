@@ -21,7 +21,7 @@ impl UICustomizationSettings {
     /// Defaults for agent-first development (all features enabled).
     pub fn agent_defaults() -> Self {
         Self {
-            use_vertical_tabs: true,
+            use_vertical_tabs: false,
             show_conversation_history: true,
             show_project_explorer: true,
             show_global_search: true,

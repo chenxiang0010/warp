@@ -625,7 +625,7 @@ impl UpdateEnvironmentForm {
             mode,
             form_state: EnvironmentFormValues::default(),
             repos_input: String::new(),
-            github_auth_redirect_target: GithubAuthRedirectTarget::SettingsEnvironments,
+            github_auth_redirect_target: GithubAuthRedirectTarget::FocusCloudMode,
             copy,
             field_max_width: DROPDOWN_MAX_WIDTH,
             field_spacing: FORM_FIELD_SPACING,
@@ -2848,16 +2848,15 @@ impl UpdateEnvironmentForm {
     }
 
     fn auth_url_with_next(&self, base_auth_url: &str) -> String {
-        match (self.github_auth_redirect_target, self.auth_source) {
-            (GithubAuthRedirectTarget::SettingsEnvironments, AuthSource::Settings) => {
-                github_auth_url::settings_environments_auth_url_with_next(base_auth_url)
-            }
-            (GithubAuthRedirectTarget::FocusCloudMode, AuthSource::CloudSetup) => {
+        match self.auth_source {
+            AuthSource::CloudSetup => {
                 github_auth_url::cloud_setup_auth_url_with_next(base_auth_url)
             }
-            (target, auth_source) => {
-                github_auth_url::auth_url_with_next(base_auth_url, target, auth_source)
-            }
+            AuthSource::Settings => github_auth_url::auth_url_with_next(
+                base_auth_url,
+                self.github_auth_redirect_target,
+                self.auth_source,
+            ),
         }
     }
 

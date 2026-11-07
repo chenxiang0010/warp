@@ -825,7 +825,7 @@ fn test_set_github_auth_redirect_target_updates_form() {
             let target = view.environment_form.read(ctx, |form, _ctx| {
                 form.github_auth_redirect_target_for_test()
             });
-            assert_eq!(target, GithubAuthRedirectTarget::SettingsEnvironments);
+            assert_eq!(target, GithubAuthRedirectTarget::FocusCloudMode);
         });
 
         app.update(|ctx| {

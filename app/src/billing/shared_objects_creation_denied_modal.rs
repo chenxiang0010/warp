@@ -35,7 +35,7 @@ pub enum SharedObjectsCreationDeniedModalAction {
 
 pub enum SharedObjectsCreationDeniedModalEvent {
     Close,
-    TeamSettings,
+    BillingAndUsage,
 }
 
 pub fn init(app: &mut AppContext) {
@@ -178,20 +178,19 @@ impl SharedObjectsCreationDeniedModal {
                 Some(team_uid) => {
                     ctx.open_url(UserWorkspaces::upgrade_link_for_team(team_uid).as_str());
                 }
-                // Otherwise redirect them to the team settings page.
-                None => ctx.emit(SharedObjectsCreationDeniedModalEvent::TeamSettings),
+                // Otherwise redirect them to the billing and usage page.
+                None => ctx.emit(SharedObjectsCreationDeniedModalEvent::BillingAndUsage),
             },
             SharedObjectsCreationDeniedBodyEvent::ManageBilling => match self.team_uid {
                 // If team_uid is set, then open up the manage billing page for the team
-                // directly. The actual logic that opens the billing portal url in the
-                // browser is in the handle_model_event method of TeamsPageView.
+                // directly.
                 Some(team_uid) => {
                     UserWorkspaces::handle(ctx).update(ctx, move |user_workspaces, ctx| {
                         user_workspaces.generate_stripe_billing_portal_link(team_uid, ctx);
                     });
                 }
-                // Otherwise redirect them to the team settings page.
-                None => ctx.emit(SharedObjectsCreationDeniedModalEvent::TeamSettings),
+                // Otherwise redirect them to the billing and usage page.
+                None => ctx.emit(SharedObjectsCreationDeniedModalEvent::BillingAndUsage),
             },
         }
     }

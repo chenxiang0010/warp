@@ -379,14 +379,8 @@ fn test_unassigned_user_spend_limit_cta_uses_workspace_authority() {
 }
 
 #[test]
-fn test_unassigned_user_spend_limit_cta_offers_admin_both_actions() {
-    let mut workspace_admin = workspace_with_role(MembershipRole::Admin);
-    workspace_admin.open_teams.push(DiscoverableTeam {
-        team_uid: "0000000000000000000002".to_string(),
-        num_members: 2,
-        name: "Open Team".to_string(),
-        team_accepting_invites: true,
-    });
+fn test_unassigned_user_spend_limit_cta_offers_admin_manage_limit() {
+    let workspace_admin = workspace_with_role(MembershipRole::Admin);
 
     let cta = enterprise_limit_cta(
         &PromptAlertState::EnterpriseUnassignedUserSpendLimitReached,
@@ -395,7 +389,7 @@ fn test_unassigned_user_spend_limit_cta_offers_admin_both_actions() {
         Some(TEST_EMAIL),
     )
     .expect("workspace admin should receive CTAs");
-    assert_eq!(cta.len(), 4);
+    assert_eq!(cta.len(), 2);
     assert_eq!(cta[0], FormattedTextFragment::plain_text("  "));
     assert_eq!(
         cta[1],
@@ -404,18 +398,10 @@ fn test_unassigned_user_spend_limit_cta_offers_admin_both_actions() {
             AdminActions::admin_panel_link_for_workspace(),
         )
     );
-    assert_eq!(cta[2], FormattedTextFragment::plain_text(" or "));
-    assert_eq!(cta[3].text, "join a team");
-    let Some(markdown_parser::Hyperlink::Action(action)) = &cta[3].styles.hyperlink else {
-        panic!("join CTA should dispatch an action");
-    };
-    assert!(matches!(
-        action.as_any().downcast_ref::<WorkspaceAction>(),
-        Some(WorkspaceAction::BrowseTeams)
-    ));
 }
+
 #[test]
-fn test_unassigned_user_spend_limit_cta_offers_open_teams() {
+fn test_unassigned_user_spend_limit_cta_asks_workspace_admin() {
     let mut workspace_member = workspace_with_role(MembershipRole::User);
     workspace_member.open_teams.push(DiscoverableTeam {
         team_uid: "0000000000000000000002".to_string(),
@@ -431,19 +417,12 @@ fn test_unassigned_user_spend_limit_cta_offers_open_teams() {
         Some(TEST_EMAIL),
     )
     .expect("unassigned user should receive a CTA");
-    assert_eq!(cta.len(), 2);
     assert_eq!(
-        cta[0],
-        FormattedTextFragment::plain_text("  Ask a workspace admin to increase it, or ")
+        cta,
+        vec![FormattedTextFragment::plain_text(
+            "  Ask a workspace admin to increase it"
+        )]
     );
-    assert_eq!(cta[1].text, "join a team");
-    let Some(markdown_parser::Hyperlink::Action(action)) = &cta[1].styles.hyperlink else {
-        panic!("join CTA should dispatch an action");
-    };
-    assert!(matches!(
-        action.as_any().downcast_ref::<WorkspaceAction>(),
-        Some(WorkspaceAction::BrowseTeams)
-    ));
 }
 
 #[test]

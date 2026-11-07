@@ -596,18 +596,6 @@ impl PrivacySettings {
         ctx.notify();
     }
 
-    pub fn remove_user_secret_regex(&mut self, idx: &usize, ctx: &mut ModelContext<Self>) {
-        let mut new_user_secret_regex_list = self.user_secret_regex_list.to_vec();
-        new_user_secret_regex_list.remove(*idx);
-        if self
-            .user_secret_regex_list
-            .set_value(new_user_secret_regex_list, ctx)
-            .is_err()
-        {
-            report_error!("Custom Secret Regex List failed to serialize")
-        }
-    }
-
     /// Initializes the custom secret regex list with the default regexes, provided
     /// non matches can be found.
     /// This can be called when a user first enables secret redaction.

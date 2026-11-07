@@ -90,7 +90,6 @@ pub enum AuthManagerEvent {
 
 pub type LoginGatedFeature = &'static str;
 
-type URLConstructorCallback = Box<dyn FnOnce(Option<&str>) -> String>;
 const DEVICE_CODE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const DEVICE_CODE_REQUEST_ATTEMPTS: usize = 2;
 
@@ -794,42 +793,6 @@ impl AuthManager {
                         ctx.emit(AuthManagerEvent::MintCustomTokenFailed(e));
                     }
                 }
-            },
-        );
-    }
-
-    // Opens a page in the web app and logs the user in using a customToken if they are an anonymous user.
-    // Accepts a callback that constructs the URL using the customToken to open a page and log in an anonymous user.
-    pub fn open_url_maybe_with_anonymous_token(
-        &self,
-        ctx: &mut ModelContext<Self>,
-        construct_url: URLConstructorCallback,
-    ) {
-        if !self.auth_state.is_user_anonymous().unwrap_or_default()
-            || !self.auth_state.is_logged_in()
-        {
-            // Not an anonymous Firebase user, or fully logged out — open URL without token.
-            let url: String = construct_url(None);
-            ctx.open_url(&url);
-            return;
-        }
-
-        let auth_client = self.auth_client.clone();
-        let _ = ctx.spawn(
-            async move { auth_client.fetch_new_custom_token().await },
-            move |me, response, ctx| {
-                let custom_token = me.auth_client.on_custom_token_fetched(response);
-                match custom_token {
-                    Ok(custom_token) => {
-                        let url: String = construct_url(Some(&custom_token));
-                        ctx.open_url(&url);
-                    }
-                    Err(e) => {
-                        report_error!(anyhow::Error::new(e).context(
-                            "Failed to fetch custom token for authenticating anonymous user in browser"
-                        ))
-                }
-                };
             },
         );
     }

@@ -1,11 +1,11 @@
 use warp::cmd_or_ctrl_shift;
+use warp::integration_testing::settings::{set_hide_secrets_in_block_list, set_safe_mode};
 use warp::integration_testing::terminal::util::current_shell_starter_and_version;
 use warp::integration_testing::terminal::{
     assert_context_menu_is_open, initialize_secret_regexes,
     wait_until_bootstrapped_single_pane_for_tab,
 };
 use warp::integration_testing::view_getters::single_terminal_view_for_tab;
-use warp::settings_view::{PrivacyPageAction, SettingsAction};
 use warp::terminal::GridType;
 use warp::terminal::model::index::Point;
 use warp::terminal::model::terminal_model::{BlockIndex, WithinBlock, WithinModel};
@@ -23,7 +23,7 @@ use crate::test::integration_testing::secret_redaction::assert_secret_tooltip_op
 use crate::test::integration_testing::terminal::{
     clear_blocklist_to_remove_bootstrapped_blocks, hover_over_block_zero,
 };
-use crate::test::{TestStep, new_step_with_default_assertions, toggle_setting};
+use crate::test::{TestStep, new_step_with_default_assertions};
 
 // TODO(CORE-2721): Block count / index Failed b/c of in-band generators
 pub fn test_block_filtering_keybinding() -> Builder {
@@ -269,12 +269,8 @@ pub fn test_block_filtering_with_secrets() -> Builder {
         .with_step(initialize_secret_regexes())
         .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
         .with_step(clear_blocklist_to_remove_bootstrapped_blocks())
-        .with_step(toggle_setting(SettingsAction::PrivacyPageToggle(
-            PrivacyPageAction::ToggleSafeMode,
-        )))
-        .with_step(toggle_setting(SettingsAction::PrivacyPageToggle(
-            PrivacyPageAction::ToggleHideSecretsInBlockList,
-        )))
+        .with_step(set_safe_mode(true))
+        .with_step(set_hide_secrets_in_block_list(true))
         .with_step(SecretTestCase::execute_command())
         .with_step(open_block_filter_editor())
         .with_step(SecretTestCase::perform_filter_query())

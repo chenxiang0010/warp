@@ -783,7 +783,7 @@ impl UserWorkspaces {
     /// Cloud agents require a team only in native workspaces: a legacy
     /// (non-native) workspace's teamless state is resolved by creating a
     /// team, not by joining an existing one, so it isn't subject to this
-    /// blocker (see `TeamsPageView::page_sections_for`).
+    /// blocker.
     pub fn cloud_agents_require_team(&self) -> bool {
         self.current_workspace().is_some_and(|workspace| {
             workspace.is_native_workspaces_enabled() && workspace.teams.is_empty()
@@ -919,16 +919,6 @@ impl UserWorkspaces {
                 report_error!(e.context("Failed to load user workspaces"));
             }
         }
-    }
-
-    pub fn team_created(
-        &mut self,
-        create_team_response: &CreateTeamResponse,
-        ctx: &mut ModelContext<Self>,
-    ) {
-        self.workspaces.push(create_team_response.workspace.clone());
-        self.set_current_workspace_uid(create_team_response.workspace.uid, ctx);
-        self.notify_and_emit_teams_changed(ctx);
     }
 
     fn on_remove_user_from_team(

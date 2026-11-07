@@ -14,8 +14,14 @@ pub enum LLMProvider {
 }
 
 impl LLMProvider {
-    pub const API_KEY_PROVIDERS: [Self; 4] =
-        [Self::OpenAI, Self::Anthropic, Self::Google, Self::Xai];
+    /// Providers offered as first-party API-key integrations in the settings UI.
+    ///
+    /// This build resolves models exclusively through user-defined custom endpoints,
+    /// so no first-party provider is offered. The `LLMProvider` variants stay in the
+    /// type (the server catalog still labels models this way and snapshots round-trip
+    /// through them), but nothing renders a key editor or an OAuth subscription for
+    /// them.
+    pub const API_KEY_PROVIDERS: [Self; 0] = [];
     pub const API_KEY_PROVIDER_VALUE_NAME: &'static str = "openai|anthropic|google|grok";
 
     pub fn icon(self) -> Option<Icon> {

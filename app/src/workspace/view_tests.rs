@@ -288,23 +288,23 @@ pub(crate) fn mock_workspace(app: &mut App) -> ViewHandle<Workspace> {
 #[test]
 fn test_team_navigation_mode() {
     assert_eq!(
-        team_navigation_mode(true, true, true, false),
+        team_navigation_mode(true, true, false),
         TeamNavigationMode::TeamSwitcher
     );
     assert_eq!(
-        team_navigation_mode(true, true, false, true),
+        team_navigation_mode(true, false, true),
         TeamNavigationMode::TeamSwitcher
     );
     assert_eq!(
-        team_navigation_mode(true, true, false, false),
+        team_navigation_mode(true, false, false),
         TeamNavigationMode::Hidden
     );
     assert_eq!(
-        team_navigation_mode(false, false, false, true),
-        TeamNavigationMode::BrowseTeams
+        team_navigation_mode(false, false, true),
+        TeamNavigationMode::Hidden
     );
     assert_eq!(
-        team_navigation_mode(false, false, false, false),
+        team_navigation_mode(false, false, false),
         TeamNavigationMode::Hidden
     );
 }

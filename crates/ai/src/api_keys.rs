@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, SystemTime};
 
 #[cfg(not(target_family = "wasm"))]
@@ -370,43 +369,13 @@ impl schemars::JsonSchema for CustomEndpointDefinitions {
 
 pub fn validate_custom_endpoint_url(value: &str) -> Result<(), &'static str> {
     let parsed = Url::parse(value).map_err(|_| "Invalid URL")?;
-    if parsed.scheme() != "https" {
-        return Err("URL must use HTTPS");
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("URL must use HTTP or HTTPS");
     }
-    let Some(host) = parsed.host_str().filter(|host| !host.is_empty()) else {
+    if parsed.host_str().is_none_or(str::is_empty) {
         return Err("URL must include a host");
-    };
-    if is_restricted_host(host) {
-        return Err("URL must not use a local or private host");
     }
     Ok(())
-}
-
-fn is_restricted_host(host: &str) -> bool {
-    let host = host
-        .strip_prefix('[')
-        .and_then(|host| host.strip_suffix(']'))
-        .unwrap_or(host);
-    host.eq_ignore_ascii_case("localhost") || host.parse::<IpAddr>().is_ok_and(is_restricted_ip)
-}
-
-fn is_restricted_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(ip) => is_restricted_ipv4(ip),
-        IpAddr::V6(ip) => is_restricted_ipv6(ip),
-    }
-}
-
-fn is_restricted_ipv4(ip: Ipv4Addr) -> bool {
-    ip.is_loopback() || ip.is_unspecified() || ip.is_private() || ip.is_link_local()
-}
-
-fn is_restricted_ipv6(ip: Ipv6Addr) -> bool {
-    ip.is_loopback()
-        || ip.is_unspecified()
-        || ip.segments()[0] & 0xfe00 == 0xfc00
-        || ip.segments()[0] & 0xffc0 == 0xfe80
-        || ip.to_ipv4_mapped().is_some_and(is_restricted_ipv4)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]

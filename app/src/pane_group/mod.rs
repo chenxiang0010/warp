@@ -2730,7 +2730,7 @@ impl PaneGroup {
                 if let Some(pane) = self.focused_pane_content(ctx) {
                     pane.focus(ctx);
                 }
-                ctx.emit(Event::OpenSettings(SettingsSection::Teams));
+                ctx.emit(Event::OpenSettings(SettingsSection::BillingAndUsage));
                 ctx.notify();
 
                 send_telemetry_from_ctx!(TelemetryEvent::SharedSessionModalUpgradePressed, ctx);

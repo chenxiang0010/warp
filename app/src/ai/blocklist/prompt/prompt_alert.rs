@@ -42,7 +42,6 @@ const DELINQUENT_DUE_TO_PAYMENT_ISSUE_ACTION_TEXT: &str = "Manage billing";
 const OVERAGES_TOGGLEABLE_BUT_NOT_ENABLED_ACTION_TEXT: &str = "Enable premium overages";
 const MONTHLY_OVERAGES_SPEND_LIMIT_REACHED_ACTION_TEXT: &str = "Increase monthly spend limit";
 const MANAGE_LIMIT_TEXT: &str = "Manage limit";
-const JOIN_A_TEAM_TEXT: &str = "join a team";
 const UPGRADE_TEXT: &str = "Upgrade";
 const COMPARE_PLANS_TEXT: &str = "Compare plans";
 const CONTACT_SUPPORT_TEXT: &str = "Contact support";
@@ -61,7 +60,7 @@ fn enterprise_limit_cta(
     user_email: Option<&str>,
 ) -> Option<Vec<FormattedTextFragment>> {
     let user_email = user_email.unwrap_or_default();
-    let (admin_panel_link, non_admin_text, can_join_team) = match state {
+    let (admin_panel_link, non_admin_text) = match state {
         PromptAlertState::EnterpriseTeamSpendLimitReached
         | PromptAlertState::EnterpriseIndividualSpendLimitReached => (
             team.filter(|team| {
@@ -71,21 +70,18 @@ fn enterprise_limit_cta(
             })
             .map(|team| AdminActions::admin_panel_link_for_team(team.uid)),
             NON_ADMIN_CONTACT_ADMIN_TEXT,
-            false,
         ),
         PromptAlertState::EnterpriseUnassignedUserSpendLimitReached => (
             workspace
                 .filter(|workspace| workspace.is_native_workspaces_admin(user_email))
                 .map(|_| AdminActions::admin_panel_link_for_workspace()),
             NON_ADMIN_ASK_WORKSPACE_ADMIN_TO_INCREASE_LIMIT_TEXT,
-            true,
         ),
         PromptAlertState::EnterpriseWorkspaceSpendLimitReached => (
             workspace
                 .filter(|workspace| workspace.is_native_workspaces_admin(user_email))
                 .map(|_| AdminActions::admin_panel_link_for_workspace()),
             NON_ADMIN_CONTACT_WORKSPACE_ADMIN_TEXT,
-            false,
         ),
         PromptAlertState::NoConnection
         | PromptAlertState::AnonymousUserRequestLimitSoftGate
@@ -96,27 +92,10 @@ fn enterprise_limit_cta(
         | PromptAlertState::RequestLimitReached
         | PromptAlertState::NoAlert => return None,
     };
-    let has_joinable_team = can_join_team
-        && !cfg!(target_family = "wasm")
-        && workspace.is_some_and(|workspace| workspace.joinable_teams().next().is_some());
     if let Some(link) = admin_panel_link {
-        let mut fragments = vec![
+        return Some(vec![
             FormattedTextFragment::plain_text("  "),
             FormattedTextFragment::hyperlink(MANAGE_LIMIT_TEXT, link),
-        ];
-        if has_joinable_team {
-            fragments.push(FormattedTextFragment::plain_text(" or "));
-            fragments.push(FormattedTextFragment::hyperlink_action(
-                JOIN_A_TEAM_TEXT,
-                WorkspaceAction::BrowseTeams,
-            ));
-        }
-        return Some(fragments);
-    }
-    if has_joinable_team {
-        return Some(vec![
-            FormattedTextFragment::plain_text(format!("{non_admin_text}, or ")),
-            FormattedTextFragment::hyperlink_action(JOIN_A_TEAM_TEXT, WorkspaceAction::BrowseTeams),
         ]);
     }
     Some(vec![FormattedTextFragment::plain_text(non_admin_text)])

@@ -11,7 +11,9 @@ fn main() -> Result<()> {
     let mut state = ChannelState::new(
         Channel::Oss,
         ChannelConfig {
-            app_id: AppId::new("dev", "warp", "WarpOss"),
+            // Shares the official stable build's data directories so this fork
+            // picks up the settings, history, and credentials already on disk.
+            app_id: AppId::new("dev", "warp", "Warp"),
             logfile_name: "warp-oss.log".into(),
             server_config: WarpServerConfig::production(),
             oz_config: OzConfig::production(),

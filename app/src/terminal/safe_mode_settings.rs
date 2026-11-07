@@ -50,24 +50,6 @@ impl SecretDisplayMode {
             SecretDisplayMode::Strikethrough
         }
     }
-
-    /// Display name for UI
-    pub fn display_name(self) -> &'static str {
-        match self {
-            SecretDisplayMode::Asterisks => "Asterisks",
-            SecretDisplayMode::Strikethrough => "Strikethrough",
-            SecretDisplayMode::AlwaysShow => "Always show secrets",
-        }
-    }
-
-    /// Get all available modes for dropdown
-    pub fn all_modes() -> [SecretDisplayMode; 3] {
-        [
-            SecretDisplayMode::Asterisks,
-            SecretDisplayMode::Strikethrough,
-            SecretDisplayMode::AlwaysShow,
-        ]
-    }
 }
 
 define_settings_group!(SafeModeSettings, settings: [

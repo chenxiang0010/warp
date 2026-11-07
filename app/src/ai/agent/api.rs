@@ -2,6 +2,7 @@ pub(crate) mod convert_conversation;
 mod convert_from;
 mod convert_to;
 mod r#impl;
+mod local_endpoint;
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -353,7 +354,7 @@ impl RequestParams {
             user_workspaces.is_aws_bedrock_credentials_enabled(scope, app),
             geap_binding,
         );
-        let is_custom_inference_enabled = user_workspaces.is_byo_endpoint_enabled(app)
+        let is_custom_inference_enabled = user_workspaces.is_byo_endpoint_enabled()
             && user_workspaces.are_member_byo_endpoints_allowed(scope);
         let custom_model_providers =
             api_key_manager.custom_model_providers_for_request(is_custom_inference_enabled);

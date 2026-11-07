@@ -125,7 +125,10 @@ impl NewSessionDataSource {
 
         shell_id_to_options.clear();
 
-        for shell in AvailableShells::as_ref(ctx).get_available_shells() {
+        for shell in AvailableShells::as_ref(ctx)
+            .get_available_shells()
+            .filter(|shell| shell.selector_visible())
+        {
             let Some(id_str) = shell.id() else { continue };
 
             if self.allowed.windows {

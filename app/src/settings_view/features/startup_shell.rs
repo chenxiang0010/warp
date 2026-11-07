@@ -139,7 +139,10 @@ impl StartupShellView {
             let shell_to_index = AvailableShells::handle(ctx).read(ctx, |model, _| {
                 let mut shell_to_index = std::collections::HashMap::new();
                 // Iterate over each shell in the model and add it to the dropdown if it's valid.
-                for shell_entry in model.get_available_shells() {
+                for shell_entry in model
+                    .get_available_shells()
+                    .filter(|shell| shell.selector_visible())
+                {
                     items.push(DropdownItem::new(
                         model.display_name_for_shell(shell_entry),
                         NewSessionShellAction::Set(shell_entry.clone()),

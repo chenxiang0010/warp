@@ -7722,6 +7722,13 @@ impl Input {
         }
 
         let command = self.get_command(ctx);
+        if command.is_empty() {
+            // The draft was cleared while waiting for the shell to finish
+            // bootstrapping; nothing left to run.
+            self.has_pending_command = false;
+            return;
+        }
+
         if self.can_execute_command(ctx).is_no() {
             return;
         }
@@ -7966,6 +7973,18 @@ impl Input {
         ctx: &mut ViewContext<Self>,
     ) -> bool {
         if let CanExecuteCommand::No(reason) = self.can_execute_command(ctx) {
+            // A user-submitted command that arrives while the shell is still
+            // bootstrapping (common on cold WSL starts, where shell discovery and
+            // rc loading take seconds) used to be dropped without feedback. Keep
+            // it pending so `execute_pending_command` runs it once the bootstrap
+            // precmd lands.
+            if matches!(&reason, DenyExecutionReason::NotBootstrapped)
+                && matches!(&source, CommandExecutionSource::User)
+                && !command.is_empty()
+            {
+                self.has_pending_command = true;
+            }
+
             if reason.is_existing_active_command() {
                 const MAX_COMMAND_LENGTH: usize = 43;
                 let truncated_command = truncate_from_end(command, MAX_COMMAND_LENGTH);

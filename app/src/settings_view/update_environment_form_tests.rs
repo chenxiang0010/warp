@@ -68,33 +68,6 @@ fn test_parse_repo_inputs_invalid_returns_empty() {
 }
 
 #[test]
-fn test_build_auth_url_with_next_overrides_existing() {
-    let base_url =
-        "https://example.com/oauth/connect/github?foo=bar&next=old://settings/environments";
-    let result = UpdateEnvironmentForm::build_auth_url_with_next(
-        base_url,
-        GithubAuthRedirectTarget::SettingsEnvironments,
-        "warpdev",
-    );
-    let parsed = Url::parse(&result).expect("result should be valid url");
-    let mut next_values = parsed
-        .query_pairs()
-        .filter(|(key, _)| key == "next")
-        .map(|(_, value)| value.into_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(next_values.len(), 1);
-    assert_eq!(
-        next_values.pop(),
-        Some("warpdev://settings/environments".to_string())
-    );
-    assert!(
-        parsed
-            .query_pairs()
-            .any(|(key, value)| key == "foo" && value == "bar")
-    );
-}
-
-#[test]
 fn test_build_auth_url_with_next_focus_cloud_mode() {
     let base_url = "https://example.com/oauth/connect/github";
     let result = UpdateEnvironmentForm::build_auth_url_with_next(

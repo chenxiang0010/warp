@@ -163,6 +163,36 @@ impl AvailableShell {
         }
     }
 
+    /// Whether this shell should appear in the shell selector (new-tab dropdown,
+    /// settings default-shell dropdown, and command palette).
+    ///
+    /// On Windows, discovery probes every PowerShell install location plus the
+    /// MSYS2 trees bundled with Git for Windows, so the picker ends up listing
+    /// near-duplicates almost nobody opens. Only PowerShell 7 (`pwsh.exe`) and
+    /// WSL distributions are offered there. These shells stay in the model so
+    /// snapshots, tab configs, and saved preferences can still resolve them;
+    /// they are only hidden from pickers.
+    pub fn selector_visible(&self) -> bool {
+        match self.state.as_ref() {
+            Config::KnownLocal(LocalConfig {
+                command,
+                shell_type,
+                ..
+            }) => {
+                if !cfg!(windows) {
+                    return true;
+                }
+                matches!(shell_type, ShellType::PowerShell)
+                    && command.eq_ignore_ascii_case("pwsh.exe")
+            }
+            Config::MSYS2(_) => !cfg!(windows),
+            Config::SystemDefault
+            | Config::Wsl { .. }
+            | Config::Custom(_)
+            | Config::DockerSandbox { .. } => true,
+        }
+    }
+
     pub fn wsl_distro(&self) -> Option<String> {
         match self.state.as_ref() {
             Config::Wsl { distro } => Some(distro.clone()),
@@ -996,3 +1026,7 @@ pub fn register(app: &mut impl warpui::AddSingletonModel) {
 #[cfg(not(windows))]
 #[path = "available_shells_tests.rs"]
 mod tests;
+
+#[cfg(all(test, windows))]
+#[path = "available_shells_selector_visibility_tests.rs"]
+mod selector_visibility_tests;

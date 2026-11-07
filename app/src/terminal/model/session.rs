@@ -683,6 +683,7 @@ impl SessionInfo {
         let session_type = Self::determine_session_type(
             &init_shell_value,
             matches!(&is_ssh_wrapper_session, IsSSHWrapperSession::Yes { .. }),
+            matches!(&launch_data, Some(ShellLaunchData::WSL { .. })),
         );
 
         let spawning_session_id = if matches!(session_type, BootstrapSessionType::WarpifiedRemote)
@@ -723,7 +724,16 @@ impl SessionInfo {
     fn determine_session_type(
         init_shell_value: &InitShellValue,
         is_ssh_session: bool,
+        is_wsl_session: bool,
     ) -> BootstrapSessionType {
+        // WSL distributions run in a local VM and routinely have a hostname that differs
+        // from the Windows machine name, so hostname equality would misclassify them as
+        // remote and break local-session features such as inheriting the working directory
+        // into a new tab.
+        if is_wsl_session && !is_ssh_session {
+            return BootstrapSessionType::Local;
+        }
+
         match get_local_hostname() {
             Ok(local_hostname) => {
                 // Ensures subshells are treated as local
@@ -747,6 +757,7 @@ impl SessionInfo {
     fn determine_session_type(
         _init_shell_value: &InitShellValue,
         _is_ssh_session: bool,
+        _is_wsl_session: bool,
     ) -> BootstrapSessionType {
         // When the `remote_tty` feature is enabled--the session is always considered remote.
         BootstrapSessionType::WarpifiedRemote

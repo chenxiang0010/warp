@@ -280,7 +280,7 @@ fn account_first_path_uses_agent_ui_defaults() {
             else {
                 panic!("account-first onboarding should preserve agent UI defaults");
             };
-            assert!(ui.use_vertical_tabs);
+            assert!(!ui.use_vertical_tabs);
             assert!(ui.show_conversation_history);
             assert!(ui.show_project_explorer);
             assert!(ui.show_global_search);

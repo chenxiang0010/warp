@@ -20,7 +20,7 @@ use crate::ui_components::buttons::{icon_button, icon_button_with_color};
 use crate::ui_components::icons::Icon;
 
 const UNSHARABLE_CONVERSATION_TOOLTIP: &str = "This conversation cannot be shared because it is not \
-    stored in the cloud.\nTo sync to cloud and share, enable the setting under Settings > Privacy, \
+    stored in the cloud.\nTo sync to cloud and share, enable cloud conversation storage, \
     and then make another request.";
 
 /// Pane header component for sharing the pane contents.

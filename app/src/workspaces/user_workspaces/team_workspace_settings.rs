@@ -403,8 +403,8 @@ impl UserWorkspaces {
     /// [`Self::are_member_byo_endpoints_allowed`] across every team at once, for callers with no
     /// window: id resolution and preference reconciliation act on state that follows the user
     /// between teams and devices, so neither may turn on one arbitrarily elected team's policy.
-    pub fn is_byo_endpoint_enabled_for_any_team(&self, app: &AppContext) -> bool {
-        self.is_byo_endpoint_enabled(app) && self.any_team_allows_member_byo_endpoints()
+    pub fn is_byo_endpoint_enabled_for_any_team(&self) -> bool {
+        self.is_byo_endpoint_enabled() && self.any_team_allows_member_byo_endpoints()
     }
 
     /// Unlike [`Self::team_byo_for_scope`], several teams is not ambiguous here: any one

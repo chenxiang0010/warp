@@ -574,7 +574,7 @@ impl AIRequestUsageModel {
             .custom_endpoints()
             .iter()
             .any(|endpoint| !endpoint.api_key.trim().is_empty());
-        if user_workspaces.is_byo_endpoint_enabled(ctx)
+        if user_workspaces.is_byo_endpoint_enabled()
             && user_workspaces.are_member_byo_endpoints_allowed(scope)
             && has_custom_endpoint_key
         {
@@ -769,16 +769,6 @@ impl AIRequestUsageModel {
         self.workspace_and_team_bonus_grants(uid)
             .map(|grant| grant.usage_cents_remaining)
             .sum()
-    }
-
-    pub fn total_current_workspace_and_team_bonus_credits_remaining(
-        &self,
-        ctx: &AppContext,
-    ) -> i32 {
-        UserWorkspaces::as_ref(ctx)
-            .current_workspace()
-            .map(|workspace| self.total_workspace_and_team_bonus_credits_remaining(workspace.uid))
-            .unwrap_or(0)
     }
 
     fn user_interactive_bonus_grants(&self) -> impl Iterator<Item = &BonusGrant> {

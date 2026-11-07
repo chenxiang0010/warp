@@ -546,12 +546,12 @@ impl MCPServersEditPageView {
             let window_id = ctx.window_id();
             ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
                 toast_stack.add_ephemeral_toast(
-                    DismissibleToast::error("This MCP server contains secrets. Visit Settings > Privacy to modify your secret redaction settings.".to_string()),
+                    DismissibleToast::error("This MCP server contains secrets. Update your secret redaction settings to save it.".to_string()),
                     window_id,
                     ctx,
                 );
             });
-            return Err("This MCP server contains secrets. Visit Settings > Privacy to modify your secret redaction settings.".to_string());
+            return Err("This MCP server contains secrets. Update your secret redaction settings to save it.".to_string());
         }
 
         Ok(())
@@ -977,8 +977,8 @@ impl TypedActionView for MCPServersEditPageView {
 /// redaction is in force AND the parsed config contains secret-shaped strings.
 ///
 /// We block only when redaction is actually active — either the user-level
-/// Settings > Privacy > Secret redaction toggle is on, or the user's workspace
-/// has enterprise enforcement enabled. With both off, the user has explicitly
+/// secret redaction toggle is on, or the user's workspace has enterprise
+/// enforcement enabled. With both off, the user has explicitly
 /// opted to embed secrets in the config and we save it as written (#8761).
 fn should_block_save_for_secrets(
     safe_mode_enabled: bool,

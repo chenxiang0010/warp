@@ -10971,6 +10971,40 @@ fn visible_bootstrap_block_leaves_focus_on_tab_rename_editor() {
 }
 
 #[test]
+fn visible_bootstrap_block_does_not_steal_focus_from_input_draft() {
+    App::test((), |mut app| async move {
+        initialize_workspace_app(&mut app);
+        let workspace = mock_workspace(&mut app);
+        let (window, terminal) = workspace.update(&mut app, |workspace, ctx| {
+            let terminal = workspace
+                .active_tab_pane_group()
+                .as_ref(ctx)
+                .active_session_view(ctx)
+                .expect("tab should contain a terminal");
+            (ctx.window_id(), terminal)
+        });
+
+        terminal.update(&mut app, |view, ctx| {
+            view.focus_input_box(ctx);
+            view.input.update(ctx, |input, ctx| {
+                input.system_insert("echo hi", ctx);
+            });
+        });
+        let focused_before = app.focused_view_id(window);
+
+        terminal.update(&mut app, |view, ctx| {
+            view.handle_terminal_event(&ModelEvent::VisibleBootstrapBlock, ctx);
+        });
+
+        assert_eq!(
+            app.focused_view_id(window),
+            focused_before,
+            "a late bootstrap block must not steal focus from a command the user is typing"
+        );
+    });
+}
+
+#[test]
 fn visible_bootstrap_block_leaves_focus_on_tab_group_rename_editor() {
     let _grouped_tabs_guard = FeatureFlag::GroupedTabs.override_enabled(true);
     App::test((), |mut app| async move {

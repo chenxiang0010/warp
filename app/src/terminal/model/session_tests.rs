@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use warpui::elements::Empty;
@@ -6,7 +7,10 @@ use warpui::platform::WindowStyle;
 use warpui::{App, AppContext, Element, Entity, ModelHandle, TypedActionView, View, ViewContext};
 
 use super::command_executor::testing::TestCommandExecutor;
-use super::{BootstrapSessionType, Session, SessionId, SessionInfo, Sessions, SessionsEvent};
+use super::{
+    BootstrapSessionType, InitShellValue, SSHValue, Session, SessionId, SessionInfo, Sessions,
+    SessionsEvent, ShellLaunchData, ShellType,
+};
 
 struct TestView {
     events: Vec<SessionsEvent>,
@@ -150,6 +154,68 @@ fn can_resolve_cwd_to_native_path_rejects_unix_encoded_path_on_windows() {
         SessionInfo::new_for_test().with_shell_type(crate::terminal::shell::ShellType::Bash);
     let session = Session::new(session_info, Arc::new(TestCommandExecutor::default()));
     assert!(!session.can_resolve_cwd_to_native_path("/E:/CLAUDE-BASE"));
+}
+
+fn pending_session_info(
+    hostname: &str,
+    launch_data: Option<ShellLaunchData>,
+    ssh_wrapper_session: Option<SSHValue>,
+) -> SessionInfo {
+    SessionInfo::create_pending(
+        ShellType::Bash,
+        InitShellValue {
+            shell: "bash".to_owned(),
+            hostname: hostname.to_owned(),
+            ..Default::default()
+        },
+        None,
+        launch_data,
+        ssh_wrapper_session,
+        None,
+    )
+}
+
+#[test]
+fn wsl_session_with_mismatched_hostname_is_local() {
+    // WSL distributions have their own hostname, which commonly differs from the
+    // Windows machine name. That must not demote the session to a remote one.
+    let session_info = pending_session_info(
+        "wsl-host-not-the-windows-host",
+        Some(ShellLaunchData::WSL {
+            distro: "Ubuntu".to_owned(),
+        }),
+        None,
+    );
+    assert_eq!(session_info.session_type, BootstrapSessionType::Local);
+}
+
+#[test]
+fn non_wsl_session_with_mismatched_hostname_is_remote() {
+    // The hostname heuristic still identifies remote shells outside WSL.
+    let session_info = pending_session_info("some-remote-host", None, None);
+    assert_eq!(
+        session_info.session_type,
+        BootstrapSessionType::WarpifiedRemote
+    );
+}
+
+#[test]
+fn ssh_wrapper_session_inside_wsl_stays_remote() {
+    let session_info = pending_session_info(
+        "wsl-host-not-the-windows-host",
+        Some(ShellLaunchData::WSL {
+            distro: "Ubuntu".to_owned(),
+        }),
+        Some(SSHValue {
+            socket_path: PathBuf::from("C:/temp/warp-ssh.sock"),
+            remote_shell: "bash".to_owned(),
+            ..Default::default()
+        }),
+    );
+    assert_eq!(
+        session_info.session_type,
+        BootstrapSessionType::WarpifiedRemote
+    );
 }
 
 #[cfg(windows)]

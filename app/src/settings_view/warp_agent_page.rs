@@ -41,7 +41,6 @@ use warpui::elements::{
 };
 use warpui::fonts::{Properties, Weight};
 use warpui::keymap::{ContextPredicate, Keystroke};
-use warpui::ui_components::button::ButtonVariant;
 use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
 use warpui::ui_components::switch::{SwitchStateHandle, TooltipConfig};
 use warpui::{
@@ -574,7 +573,7 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
             .with_group(bindings::BindingGroup::WarpAi)
             .is_supported_on_current_platform(
                 UserWorkspaces::as_ref(app).is_byo_api_key_enabled(app)
-                    || UserWorkspaces::as_ref(app).is_byo_endpoint_enabled(app),
+                    || UserWorkspaces::as_ref(app).is_byo_endpoint_enabled(),
             ),
         ],
         app,
@@ -1544,7 +1543,7 @@ impl WarpAgentPageView {
         }
         let workspaces = UserWorkspaces::as_ref(ctx);
         let team_scope = workspaces.team_context_for_view(ctx);
-        workspaces.is_byo_endpoint_enabled(ctx)
+        workspaces.is_byo_endpoint_enabled()
             && workspaces.are_member_byo_endpoints_allowed(&team_scope)
     }
 
@@ -2425,17 +2424,11 @@ impl WarpAgentPageView {
         }
 
         let global_ai_switch_state = SwitchStateHandle::default();
-        let global_ai_sign_up_button = MouseStateHandle::default();
         PageType::new_categorized(
             categories,
             Some(PageTitle::new("Warp Agent").with_trailing_element(
                 move |_view, appearance, app| {
-                    render_global_ai_toggle(
-                        &global_ai_switch_state,
-                        &global_ai_sign_up_button,
-                        appearance,
-                        app,
-                    )
+                    render_global_ai_toggle(&global_ai_switch_state, appearance, app)
                 },
             )),
         )
@@ -3215,17 +3208,12 @@ impl From<ViewHandle<WarpAgentPageView>> for SettingsPageViewHandle {
 /// The page title's trailing widget: the global master switch for all AI features.
 fn render_global_ai_toggle(
     switch_state: &SwitchStateHandle,
-    sign_up_button: &MouseStateHandle,
     appearance: &Appearance,
     app: &AppContext,
 ) -> Box<dyn Element> {
     let ui_builder = appearance.ui_builder();
     let is_ai_disabled_due_to_remote_session_org_policy =
         AISettings::as_ref(app).is_ai_disabled_due_to_remote_session_org_policy(app);
-
-    let is_anonymous = AuthStateProvider::as_ref(app)
-        .get()
-        .is_anonymous_or_logged_out();
 
     let mut row = Flex::row().with_cross_axis_alignment(CrossAxisAlignment::Center);
 
@@ -3250,73 +3238,20 @@ fn render_global_ai_toggle(
         );
     }
 
-    // Show sign-up button for anonymous users, toggle for logged-in users
-    if is_anonymous {
-        row.add_child(
-            Flex::row()
-                .with_cross_axis_alignment(CrossAxisAlignment::Center)
-                .with_child(
-                    Container::new(
-                        Text::new_inline(
-                            "To use AI features, please create an account.",
-                            appearance.ui_font_family(),
-                            14.,
-                        )
-                        .with_color(
-                            appearance
-                                .theme()
-                                .sub_text_color(appearance.theme().surface_2())
-                                .into_solid(),
-                        )
-                        .finish(),
-                    )
-                    .with_margin_right(16.)
-                    .finish(),
-                )
-                .with_child(
-                    Container::new(
-                        ui_builder
-                            .button(ButtonVariant::Accent, sign_up_button.clone())
-                            .with_style(UiComponentStyles {
-                                font_size: Some(14.),
-                                font_weight: Some(Weight::Semibold),
-                                border_radius: Some(CornerRadius::with_all(Radius::Pixels(4.))),
-                                padding: Some(Coords {
-                                    top: 8.,
-                                    bottom: 8.,
-                                    left: 24.,
-                                    right: 24.,
-                                }),
-                                ..Default::default()
-                            })
-                            .with_text_label("Sign up".to_owned())
-                            .build()
-                            .on_click(move |ctx, _, _| {
-                                ctx.dispatch_typed_action(WarpAgentPageAction::SignupAnonymousUser);
-                            })
-                            .finish(),
-                    )
-                    .with_padding_right(TOGGLE_BUTTON_RIGHT_PADDING)
-                    .finish(),
-                )
+    row.add_child(
+        Container::new(
+            ui_builder
+                .switch(switch_state.clone())
+                .check(AISettings::as_ref(app).is_any_ai_enabled(app))
+                .build()
+                .on_click(move |ctx, _, _| {
+                    ctx.dispatch_typed_action(WarpAgentPageAction::ToggleGlobalAI);
+                })
                 .finish(),
-        );
-    } else {
-        row.add_child(
-            Container::new(
-                ui_builder
-                    .switch(switch_state.clone())
-                    .check(AISettings::as_ref(app).is_any_ai_enabled(app))
-                    .build()
-                    .on_click(move |ctx, _, _| {
-                        ctx.dispatch_typed_action(WarpAgentPageAction::ToggleGlobalAI);
-                    })
-                    .finish(),
-            )
-            .with_padding_right(TOGGLE_BUTTON_RIGHT_PADDING)
-            .finish(),
-        );
-    }
+        )
+        .with_padding_right(TOGGLE_BUTTON_RIGHT_PADDING)
+        .finish(),
+    );
 
     row.finish()
 }
@@ -4774,6 +4709,13 @@ impl SettingsWidget for CloudAgentComputerUseWidget {
     }
 }
 
+/// Whether the Cloud Handoff settings section is offered.
+///
+/// Handoff moves local conversations onto Warp's hosted agents. This build resolves
+/// models exclusively through user-defined custom endpoints, so there is no hosted
+/// agent to hand off to and the section stays hidden.
+const CLOUD_HANDOFF_UI_ENABLED: bool = false;
+
 #[derive(Default)]
 struct CloudHandoffWidget {
     handoff_toggle: SwitchStateHandle,
@@ -4787,7 +4729,9 @@ impl SettingsWidget for CloudHandoffWidget {
     }
 
     fn should_render(&self, _app: &AppContext) -> bool {
-        FeatureFlag::OzHandoff.is_enabled() && FeatureFlag::HandoffLocalCloud.is_enabled()
+        CLOUD_HANDOFF_UI_ENABLED
+            && FeatureFlag::OzHandoff.is_enabled()
+            && FeatureFlag::HandoffLocalCloud.is_enabled()
     }
 
     fn render(
@@ -4875,7 +4819,8 @@ impl SettingsWidget for AutoHandoffOnSleepWidget {
     }
 
     fn should_render(&self, app: &AppContext) -> bool {
-        FeatureFlag::OzHandoff.is_enabled()
+        CLOUD_HANDOFF_UI_ENABLED
+            && FeatureFlag::OzHandoff.is_enabled()
             && FeatureFlag::HandoffLocalCloud.is_enabled()
             && AISettings::as_ref(app).is_cloud_handoff_enabled(app)
             && AISettings::as_ref(app)
@@ -4938,7 +4883,8 @@ impl SettingsWidget for AmpersandHandoffWidget {
     }
 
     fn should_render(&self, app: &AppContext) -> bool {
-        FeatureFlag::OzHandoff.is_enabled()
+        CLOUD_HANDOFF_UI_ENABLED
+            && FeatureFlag::OzHandoff.is_enabled()
             && FeatureFlag::HandoffLocalCloud.is_enabled()
             && AISettings::as_ref(app).is_cloud_handoff_enabled(app)
     }
@@ -5880,13 +5826,14 @@ impl CustomInferenceVisibility {
         let workspaces = UserWorkspaces::as_ref(app);
         let is_any_ai_enabled = AISettings::as_ref(app).is_any_ai_enabled(app);
         let is_byo_enabled = workspaces.is_byo_api_key_enabled(app);
-        let is_custom_inference_enabled = workspaces.is_byo_endpoint_enabled(app);
-        let member_byo_keys_allowed = workspaces.are_member_byo_keys_allowed(team_scope);
+        let is_custom_inference_enabled = workspaces.is_byo_endpoint_enabled();
         let member_byo_endpoints_allowed = workspaces.are_member_byo_endpoints_allowed(team_scope);
 
-        // BYOK: shown even when BYO is off so the upgrade CTA can render.
-        let show_provider_keys = member_byo_keys_allowed;
-        let provider_keys_enabled = show_provider_keys && is_any_ai_enabled && is_byo_enabled;
+        // This build takes models only from user-defined custom endpoints: the
+        // first-party provider key editors, the Grok/ChatGPT OAuth rows, and the
+        // Warp-credit fallback are all reached through `show_provider_keys`.
+        let show_provider_keys = false;
+        let provider_keys_enabled = false;
 
         // BYOE (custom endpoints).
         let show_custom_inference = is_custom_inference_enabled && member_byo_endpoints_allowed;

@@ -2876,19 +2876,13 @@ impl CodeReviewView {
     fn session_env(&self, app: &AppContext) -> Option<GitSessionState> {
         let terminal_view = self.focused_terminal(app)?;
         terminal_view.read(app, |terminal, ctx| {
-            let session = terminal
-                .active_block_session_id()
-                .and_then(|id| terminal.sessions_model().as_ref(ctx).get(id));
             let is_local = terminal.active_session_is_local(ctx);
             let is_remote = matches!(is_local, Some(false));
-            let is_wsl = session.as_ref().map(|s| s.is_wsl()).unwrap_or(false);
 
             let enablement = if is_remote {
                 CodingPanelEnablementState::RemoteSession {
                     has_remote_server: false,
                 }
-            } else if is_wsl {
-                CodingPanelEnablementState::UnsupportedSession
             } else {
                 CodingPanelEnablementState::Enabled
             };

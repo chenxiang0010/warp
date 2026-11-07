@@ -863,10 +863,6 @@ fn test_settings_section_for_simple_subpage() {
         Some(SettingsSection::BillingAndUsage),
     );
     assert_eq!(
-        settings_section_for_simple_subpage("platform"),
-        Some(SettingsSection::WarpCloudAgentAPIKeys),
-    );
-    assert_eq!(
         settings_section_for_simple_subpage("warp_agent"),
         Some(SettingsSection::WarpAgent),
     );
