@@ -2730,7 +2730,11 @@ impl PaneGroup {
                 if let Some(pane) = self.focused_pane_content(ctx) {
                     pane.focus(ctx);
                 }
-                ctx.emit(Event::OpenSettings(SettingsSection::BillingAndUsage));
+                let user_id = AuthStateProvider::as_ref(ctx)
+                    .get()
+                    .user_id()
+                    .unwrap_or_default();
+                ctx.open_url(UserWorkspaces::upgrade_link(user_id).as_str());
                 ctx.notify();
 
                 send_telemetry_from_ctx!(TelemetryEvent::SharedSessionModalUpgradePressed, ctx);

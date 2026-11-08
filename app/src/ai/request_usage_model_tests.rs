@@ -981,14 +981,6 @@ fn test_bonus_usage_cents_remaining_sums_grants_with_dollar_values() {
                 ),
             ];
 
-            assert_eq!(
-                model.total_workspace_and_team_bonus_usage_cents_remaining(uid),
-                Some(32.25)
-            );
-            assert_eq!(
-                model.total_user_interactive_bonus_usage_cents_remaining(),
-                Some(9.0)
-            );
             assert_eq!(model.ambient_only_usage_cents_remaining(), Some(180.0));
 
             // A grant without a dollar value makes its total fall back to credits.
@@ -1005,10 +997,6 @@ fn test_bonus_usage_cents_remaining_sums_grants_with_dollar_values() {
                 None,
             ));
             assert_eq!(
-                model.total_workspace_and_team_bonus_usage_cents_remaining(uid),
-                None
-            );
-            assert_eq!(
                 model.total_workspace_and_team_bonus_credits_remaining(uid),
                 21
             );
@@ -1019,25 +1007,16 @@ fn test_bonus_usage_cents_remaining_sums_grants_with_dollar_values() {
 }
 
 #[test]
-fn test_bonus_usage_cents_remaining_without_grants() {
+fn test_ambient_bonus_usage_cents_remaining_without_grants() {
     App::test((), |mut app| async move {
-        let (uid, workspace) = create_test_workspace();
+        let (_uid, workspace) = create_test_workspace();
         add_user_workspaces_with_workspace(&mut app, workspace);
         let request_usage_model = add_request_usage_model(&mut app);
 
         request_usage_model.update(&mut app, |model, _ctx| {
             model.bonus_grants.clear();
 
-            // An empty pool is a known zero-dollar balance, while "no ambient grants" stays
-            // unknown like its credit counterpart.
-            assert_eq!(
-                model.total_workspace_and_team_bonus_usage_cents_remaining(uid),
-                Some(0.0)
-            );
-            assert_eq!(
-                model.total_user_interactive_bonus_usage_cents_remaining(),
-                Some(0.0)
-            );
+            // "No ambient grants" stays unknown like its credit counterpart.
             assert_eq!(model.ambient_only_usage_cents_remaining(), None);
             assert_eq!(model.ambient_only_credits_remaining(), None);
         });
@@ -1204,34 +1183,6 @@ fn test_has_any_ai_remaining_false_when_premium_auto_reload_would_exceed_limit()
             assert!(
                 !model.has_any_ai_remaining(&TeamlessScopeForTest, ctx),
                 "expected has_any_ai_remaining to be false when the premium-priced reload would exceed the monthly spend limit",
-            );
-        });
-    });
-}
-
-#[test]
-fn test_has_any_ai_remaining_true_with_self_serve_auto_reload_and_billing_v2_disabled() {
-    App::test((), |mut app| async move {
-        let _guard = FeatureFlag::BillingAndUsagePageV2.override_enabled(false);
-
-        let (_uid, mut workspace) = create_test_workspace();
-        workspace
-            .billing_metadata
-            .tier
-            .purchase_add_on_credits_policy = Some(standard_purchase_policy());
-        enable_auto_reload(&mut workspace);
-
-        add_user_workspaces_with_workspace(&mut app, workspace);
-        let request_usage_model = add_request_usage_model(&mut app);
-        set_addon_credits_pricing_info(&mut app);
-
-        request_usage_model.update(&mut app, |model, ctx| {
-            model.request_limit_info = RequestLimitInfo::new_for_test(10, 10);
-            model.bonus_grants.clear();
-
-            assert!(
-                model.has_any_ai_remaining(&TeamlessScopeForTest, ctx),
-                "expected has_any_ai_remaining to be true when self-serve auto-reload is enabled without Billing and Usage V2",
             );
         });
     });

@@ -925,8 +925,7 @@ impl LLMPreferences {
         if let Some(terminal_view_id) = terminal_view_id {
             let raw_override = self.base_llm_for_terminal_view.get(&terminal_view_id);
             if let Some(llm_id) = raw_override
-                && let Some(llm_info) =
-                    self.usable_model_info_for_id(&models_by_feature.agent_mode, llm_id, app)
+                && let Some(llm_info) = self.usable_model_info_for_id(llm_id, app)
             {
                 return llm_info;
             }
@@ -936,7 +935,7 @@ impl LLMPreferences {
             .data()
             .base_model
             .clone()
-            .and_then(|id| self.usable_model_info_for_id(&models_by_feature.agent_mode, &id, app))
+            .and_then(|id| self.usable_model_info_for_id(&id, app))
             .unwrap_or_else(|| self.fallback_llm_info(&models_by_feature.agent_mode, app))
     }
 
@@ -947,12 +946,10 @@ impl LLMPreferences {
         app: &'a AppContext,
         terminal_view_id: Option<EntityId>,
     ) -> &'a LLMInfo {
-        let models_by_feature = UserWorkspaces::as_ref(app).feature_model_choice_for_scope(scope);
         if let Some(terminal_view_id) = terminal_view_id {
             let raw_override = self.base_llm_for_terminal_view.get(&terminal_view_id);
             if let Some(llm_id) = raw_override
-                && let Some(llm_info) =
-                    self.usable_model_info_for_id(&models_by_feature.agent_mode, llm_id, app)
+                && let Some(llm_info) = self.usable_model_info_for_id(llm_id, app)
             {
                 return llm_info;
             }
@@ -986,53 +983,43 @@ impl LLMPreferences {
             .data()
             .base_model
             .clone()
-            .and_then(|id| self.usable_model_info_for_id(&models_by_feature.agent_mode, &id, app))
+            .and_then(|id| self.usable_model_info_for_id(&id, app))
             .unwrap_or_else(|| self.fallback_llm_info(&models_by_feature.agent_mode, app))
     }
 
-    /// Disable-aware fallback for when the user has no explicit (usable)
-    /// selection: the feature default when usable, else the first usable
-    /// server choice, else the user's first custom-endpoint model, else the
-    /// (possibly disabled) server default as a last resort.
+    /// Fallback for when the user has no explicit (usable) selection. This build
+    /// offers only user-configured custom models, so those come first; the server
+    /// default remains a last resort so this never panics when no endpoint is set.
     fn fallback_llm_info<'a>(
         &'a self,
         available: &'a AvailableLLMs,
         app: &'a AppContext,
     ) -> &'a LLMInfo {
-        available
-            .usable_default_llm_info(app)
-            .or_else(|| self.custom_llm_choices(app).next())
+        self.custom_llm_choices(app)
+            .next()
+            .or_else(|| self.custom_router_choices().next())
+            .or_else(|| available.usable_default_llm_info(app))
             .unwrap_or_else(|| available.default_llm_info())
     }
 
-    /// Resolves `id` against `available` (a feature's server-provided model
-    /// list, custom-router gated), then the user's custom-endpoint models and
-    /// local custom routers (both gated on their respective entitlement /
-    /// feature flag).
+    /// Resolves `id` against the user's custom-endpoint models and custom
+    /// routers. Server-catalog models are not selectable in this build, so a
+    /// saved id that names one resolves to `None` and callers fall back to a
+    /// custom model.
     ///
     /// Shared by the per-surface override and execution-profile resolution
     /// paths so their lookup semantics can't drift.
-    fn model_info_for_id<'a>(
-        &'a self,
-        available: &'a AvailableLLMs,
-        id: &LLMId,
-        app: &'a AppContext,
-    ) -> Option<&'a LLMInfo> {
-        Self::server_info_for_id_router_gated(available, id)
-            .or_else(|| self.custom_llm_info_for_id_if_enabled(id, app))
+    fn model_info_for_id<'a>(&'a self, id: &LLMId, app: &'a AppContext) -> Option<&'a LLMInfo> {
+        self.custom_llm_info_for_id_if_enabled(id, app)
             .or_else(|| self.custom_router_llm_info_for_id_if_enabled(id))
     }
 
     fn usable_model_info_for_id<'a>(
         &'a self,
-        available: &'a AvailableLLMs,
         id: &LLMId,
         app: &'a AppContext,
     ) -> Option<&'a LLMInfo> {
-        Self::server_info_for_id_router_gated(available, id)
-            .filter(|info| is_usable_llm(info, app))
-            .or_else(|| self.custom_llm_info_for_id_if_enabled(id, app))
-            .or_else(|| self.custom_router_llm_info_for_id_if_enabled(id))
+        self.model_info_for_id(id, app)
     }
 
     pub fn get_active_coding_model<'a>(
@@ -1058,26 +1045,8 @@ impl LLMPreferences {
             .data()
             .coding_model
             .clone()
-            .and_then(|id| self.model_info_for_id(&models_by_feature.coding, &id, app))
+            .and_then(|id| self.model_info_for_id(&id, app))
             .unwrap_or_else(|| self.fallback_llm_info(&models_by_feature.coding, app))
-    }
-
-    /// Resolves `id` against a server-provided model list, but hides cloud/team
-    /// custom routers when the custom-router feature flag is off. Mirrors the
-    /// gating applied to local routers (see
-    /// [`Self::custom_router_llm_info_for_id_if_enabled`]) so the whole
-    /// custom-router feature is controlled by a single client flag.
-    fn server_info_for_id_router_gated<'a>(
-        available: &'a AvailableLLMs,
-        id: &LLMId,
-    ) -> Option<&'a LLMInfo> {
-        let info = available.info_for_id(id)?;
-        if !FeatureFlag::CustomModelRouters.is_enabled()
-            && custom_model_routers::is_cloud_custom_router_id(info.id.as_str())
-        {
-            return None;
-        }
-        Some(info)
     }
 
     /// Returns the set of LLMs available for Agent Mode use.
@@ -1100,15 +1069,12 @@ impl LLMPreferences {
             .agent_mode
             .choices
             .iter()
-            // This build only surfaces models backed by user-defined custom endpoints.
-            // Server catalog entries are labelled with the first-party provider serving
-            // them, while `Unknown` covers both `auto` (a router over whatever is
-            // configured) and custom endpoints, so this keeps the picker non-empty.
-            .filter(|llm| llm.provider == LLMProvider::Unknown)
-            // Gate cloud/team routers behind the same flag as local routers so
-            // the entire custom-router feature is controlled by one flag.
+            // The server catalog is not offered in this build: every entry is a
+            // Warp-hosted model, including the `auto` variants and the non-first-party
+            // models that deserialize to `Unknown`. Only server-provided custom
+            // routers — user-authored rather than Warp-hosted — survive the filter.
             .filter(move |llm| {
-                routers_enabled || !custom_model_routers::is_cloud_custom_router_id(llm.id.as_str())
+                routers_enabled && custom_model_routers::is_cloud_custom_router_id(llm.id.as_str())
             })
             .chain(self.custom_llm_choices(app))
             .chain(self.custom_router_choices())
@@ -1133,38 +1099,29 @@ impl LLMPreferences {
         scope: &S,
         app: &'a AppContext,
     ) -> impl Iterator<Item = &'a LLMInfo> + use<'a, S> {
-        // Don't show admin-disabled models in the dropdown
+        // The server catalog is not offered in this build; see
+        // `get_base_llm_choices_for_agent_mode_for_team_uid`.
         let routers_enabled = FeatureFlag::CustomModelRouters.is_enabled();
         UserWorkspaces::as_ref(app)
             .feature_model_choice_for_scope(scope)
             .coding
             .choices
             .iter()
-            .filter(|llm| !matches!(llm.disable_reason, Some(DisableReason::AdminDisabled)))
-            // Custom-endpoint models only; see `get_base_llm_choices_for_agent_mode_for_team_uid`.
-            .filter(|llm| llm.provider == LLMProvider::Unknown)
-            // Gate cloud/team routers behind the same flag as local routers.
             .filter(move |llm| {
-                routers_enabled || !custom_model_routers::is_cloud_custom_router_id(llm.id.as_str())
+                routers_enabled && custom_model_routers::is_cloud_custom_router_id(llm.id.as_str())
             })
             .chain(self.custom_llm_choices(app))
             .chain(self.custom_router_choices())
     }
 
     /// Returns the set of LLMs available for CLI agent.
-    pub fn get_cli_agent_llm_choices<'a, S: TeamScope + ?Sized>(
+    pub fn get_cli_agent_llm_choices<'a>(
         &'a self,
-        scope: &S,
         app: &'a AppContext,
-    ) -> impl Iterator<Item = &'a LLMInfo> + use<'a, S> {
-        // Don't show admin-disabled models in the dropdown
-        self.get_cli_agent_available(scope.team_uid(), app)
-            .choices
-            .iter()
-            .filter(|llm| !matches!(llm.disable_reason, Some(DisableReason::AdminDisabled)))
-            // Custom-endpoint models only; see `get_base_llm_choices_for_agent_mode_for_team_uid`.
-            .filter(|llm| llm.provider == LLMProvider::Unknown)
-            .chain(self.custom_llm_choices(app))
+    ) -> impl Iterator<Item = &'a LLMInfo> + use<'a> {
+        // The server catalog is not offered in this build; see
+        // `get_base_llm_choices_for_agent_mode_for_team_uid`.
+        self.custom_llm_choices(app)
     }
 
     /// Returns the `LLMInfo` for the CLI agent model.
@@ -1190,11 +1147,7 @@ impl LLMPreferences {
             .data()
             .cli_agent_model
             .clone()
-            .and_then(|id| {
-                available
-                    .info_for_id(&id)
-                    .or_else(|| self.custom_llm_info_for_id_if_enabled(&id, app))
-            })
+            .and_then(|id| self.custom_llm_info_for_id_if_enabled(&id, app))
             .unwrap_or_else(|| self.fallback_llm_info(available, app))
     }
 

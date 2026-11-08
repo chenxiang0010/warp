@@ -760,17 +760,6 @@ impl AIRequestUsageModel {
             .sum()
     }
 
-    /// The dollar value of [`Self::total_workspace_and_team_bonus_credits_remaining`], in cents.
-    /// `None` unless every counted grant carries a dollar value.
-    pub fn total_workspace_and_team_bonus_usage_cents_remaining(
-        &self,
-        uid: WorkspaceUid,
-    ) -> Option<f64> {
-        self.workspace_and_team_bonus_grants(uid)
-            .map(|grant| grant.usage_cents_remaining)
-            .sum()
-    }
-
     fn user_interactive_bonus_grants(&self) -> impl Iterator<Item = &BonusGrant> {
         let now = Utc::now();
         self.bonus_grants
@@ -783,14 +772,6 @@ impl AIRequestUsageModel {
     pub fn total_user_interactive_bonus_credits_remaining(&self) -> i32 {
         self.user_interactive_bonus_grants()
             .map(|grant| grant.request_credits_remaining)
-            .sum()
-    }
-
-    /// The dollar value of [`Self::total_user_interactive_bonus_credits_remaining`], in cents.
-    /// `None` unless every counted grant carries a dollar value.
-    pub fn total_user_interactive_bonus_usage_cents_remaining(&self) -> Option<f64> {
-        self.user_interactive_bonus_grants()
-            .map(|grant| grant.usage_cents_remaining)
             .sum()
     }
 

@@ -783,9 +783,7 @@ impl ExecutionProfileEditorView {
                     Self::refresh_filterable_model_dropdown(
                         &me.full_terminal_use_model_dropdown,
                         current_permissions.cli_agent_model.clone(),
-                        |prefs, scope, app| {
-                            prefs.get_cli_agent_llm_choices(scope, app).collect_vec()
-                        },
+                        |prefs, _scope, app| prefs.get_cli_agent_llm_choices(app).collect_vec(),
                         |id| ExecutionProfileEditorViewAction::SetFullTerminalUseModel { id },
                         |prefs, scope, app| {
                             prefs.get_default_cli_agent_model(scope, app).id.clone()
@@ -991,7 +989,7 @@ impl ExecutionProfileEditorView {
         Self::refresh_filterable_model_dropdown(
             &self.full_terminal_use_model_dropdown,
             current_permissions.cli_agent_model.clone(),
-            |prefs, scope, app| prefs.get_cli_agent_llm_choices(scope, app).collect_vec(),
+            |prefs, _scope, app| prefs.get_cli_agent_llm_choices(app).collect_vec(),
             |id| ExecutionProfileEditorViewAction::SetFullTerminalUseModel { id },
             |prefs, scope, app| prefs.get_default_cli_agent_model(scope, app).id.clone(),
             &self.upgrade_footer_mouse_state,
@@ -1233,6 +1231,14 @@ impl ExecutionProfileEditorView {
                 .iter()
                 .any(|llm| matches!(llm.disable_reason, Some(DisableReason::RequiresUpgrade)));
 
+            // Decide the selection before `choices` is moved into the menu items.
+            // A profile saved against a model this build no longer offers (for
+            // example a Warp-hosted model) has nothing to select; show the default
+            // custom model instead of an empty row.
+            let model_to_select = profile_model
+                .filter(|id| choices.iter().any(|llm| llm.id == *id))
+                .unwrap_or_else(|| get_default_id(llm_prefs, &scope, ctx));
+
             let items = available_model_menu_items(
                 choices,
                 |llm| DropdownAction::select_action_and_close(create_action(llm.id.clone())),
@@ -1255,10 +1261,6 @@ impl ExecutionProfileEditorView {
                 dropdown.clear_footer(ctx);
             }
 
-            let llm_prefs = LLMPreferences::handle(ctx);
-            let llm_prefs = llm_prefs.as_ref(ctx);
-            let model_to_select =
-                profile_model.unwrap_or_else(|| get_default_id(llm_prefs, &scope, ctx));
             dropdown.set_selected_by_action(create_action(model_to_select), ctx);
             ctx.notify();
         });
@@ -1286,6 +1288,17 @@ impl ExecutionProfileEditorView {
                 .get_coding_llm_choices(&scope, ctx)
                 .collect_vec();
 
+            // Decide the selection before `choices` is moved into the menu items.
+            // A profile saved against a model this build no longer offers has
+            // nothing to select; show the default custom model instead.
+            let default_model_id = LLMPreferences::as_ref(ctx)
+                .get_default_coding_model(&scope, ctx)
+                .id
+                .clone();
+            let model_to_select = profile_coding_model
+                .filter(|id| choices.iter().any(|llm| llm.id == *id))
+                .unwrap_or(default_model_id);
+
             let items = available_model_menu_items(
                 choices,
                 |llm| {
@@ -1302,12 +1315,6 @@ impl ExecutionProfileEditorView {
             );
             dropdown.set_rich_items(items, ctx);
 
-            let model_to_select = profile_coding_model.unwrap_or_else(|| {
-                LLMPreferences::as_ref(ctx)
-                    .get_default_coding_model(&scope, ctx)
-                    .id
-                    .clone()
-            });
             dropdown.set_selected_by_action(
                 ExecutionProfileEditorViewAction::SetCodingModel {
                     id: model_to_select,

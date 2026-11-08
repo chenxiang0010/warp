@@ -987,7 +987,6 @@ impl BuyCreditsBanner {
 
 #[derive(Clone, Debug)]
 pub enum BuyCreditsBannerEvent {
-    OpenBillingAndUsage,
     RefocusInput,
     OpenAutoReloadModal { purchased_credits: i32 },
     ShowAutoReloadError { error_message: &'static str },
@@ -1073,7 +1072,23 @@ impl warpui::TypedActionView for BuyCreditsBanner {
                 ctx.notify();
             }
             Action::ManageBilling => {
-                ctx.emit(BuyCreditsBannerEvent::OpenBillingAndUsage);
+                let team_uid = UserWorkspaces::as_ref(ctx)
+                    .team_for_view_handle(&self.view_handle, ctx)
+                    .map(|team| team.uid);
+                match team_uid {
+                    Some(team_uid) => {
+                        UserWorkspaces::handle(ctx).update(ctx, move |user_workspaces, ctx| {
+                            user_workspaces.generate_stripe_billing_portal_link(team_uid, ctx);
+                        });
+                    }
+                    None => {
+                        let user_id = AuthStateProvider::as_ref(ctx)
+                            .get()
+                            .user_id()
+                            .unwrap_or_default();
+                        ctx.open_url(UserWorkspaces::upgrade_link(user_id).as_str());
+                    }
+                }
                 self.should_display_banner = false;
                 AIRequestUsageModel::handle(ctx).update(ctx, |model, ctx| {
                     model.dismiss_buy_credits_banner(ctx);

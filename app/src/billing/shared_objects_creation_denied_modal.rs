@@ -12,6 +12,7 @@ use warpui::{
 use super::shared_objects_creation_denied_body::{
     SharedObjectsCreationDeniedBody, SharedObjectsCreationDeniedBodyEvent,
 };
+use crate::auth::AuthStateProvider;
 use crate::drive::DriveObjectType;
 use crate::drive::cloud_object_styling::warp_drive_icon_color;
 use crate::modal::{Modal, ModalEvent};
@@ -35,7 +36,6 @@ pub enum SharedObjectsCreationDeniedModalAction {
 
 pub enum SharedObjectsCreationDeniedModalEvent {
     Close,
-    BillingAndUsage,
 }
 
 pub fn init(app: &mut AppContext) {
@@ -178,8 +178,14 @@ impl SharedObjectsCreationDeniedModal {
                 Some(team_uid) => {
                     ctx.open_url(UserWorkspaces::upgrade_link_for_team(team_uid).as_str());
                 }
-                // Otherwise redirect them to the billing and usage page.
-                None => ctx.emit(SharedObjectsCreationDeniedModalEvent::BillingAndUsage),
+                // Otherwise open the upgrade page for the current user.
+                None => {
+                    let user_id = AuthStateProvider::as_ref(ctx)
+                        .get()
+                        .user_id()
+                        .unwrap_or_default();
+                    ctx.open_url(UserWorkspaces::upgrade_link(user_id).as_str());
+                }
             },
             SharedObjectsCreationDeniedBodyEvent::ManageBilling => match self.team_uid {
                 // If team_uid is set, then open up the manage billing page for the team
@@ -189,8 +195,14 @@ impl SharedObjectsCreationDeniedModal {
                         user_workspaces.generate_stripe_billing_portal_link(team_uid, ctx);
                     });
                 }
-                // Otherwise redirect them to the billing and usage page.
-                None => ctx.emit(SharedObjectsCreationDeniedModalEvent::BillingAndUsage),
+                // Otherwise open the upgrade page for the current user.
+                None => {
+                    let user_id = AuthStateProvider::as_ref(ctx)
+                        .get()
+                        .user_id()
+                        .unwrap_or_default();
+                    ctx.open_url(UserWorkspaces::upgrade_link(user_id).as_str());
+                }
             },
         }
     }
