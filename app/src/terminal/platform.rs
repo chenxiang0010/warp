@@ -3,7 +3,40 @@ use anyhow::Result;
 pub fn init() -> Result<()> {
     #[cfg(target_os = "macos")]
     mac::init()?;
+    #[cfg(windows)]
+    windows::init();
     Ok(())
+}
+
+#[cfg(windows)]
+mod windows {
+    use std::env;
+    use std::sync::Once;
+
+    static INIT: Once = Once::new();
+
+    /// Moves the process working directory off the install directory.
+    ///
+    /// Shortcuts that omit a "Start in" directory launch Warp with the install
+    /// directory as its working directory. Code paths that fall back to the
+    /// process working directory (agent tasks, conversation export) should see
+    /// the user's home directory instead.
+    pub fn init() {
+        INIT.call_once(|| {
+            let Some(home_dir) = dirs::home_dir() else {
+                log::warn!(
+                    "Could not determine the home directory; leaving the working directory unchanged"
+                );
+                return;
+            };
+            if let Err(err) = env::set_current_dir(&home_dir) {
+                log::warn!(
+                    "Could not change the working directory to {}: {err:#}",
+                    home_dir.display()
+                );
+            }
+        });
+    }
 }
 
 #[cfg(target_os = "macos")]
