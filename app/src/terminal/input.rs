@@ -1643,7 +1643,7 @@ fn native_shell_suggestion_results(
     shell_replacement_span: Option<Span>,
     buffer_text: &str,
     cursor_position: usize,
-    path_separators: &[char],
+    path_separators: &PathSeparators,
 ) -> SuggestionResults {
     let buffer_text_before_cursor = &buffer_text[0..cursor_position];
     let replacement_span = match shell_replacement_span {
@@ -12887,7 +12887,7 @@ impl Input {
         };
 
         let completion_session = completion_context.session.clone();
-        let path_separators = self.path_separators(ctx).all;
+        let path_separators = self.path_separators(ctx);
 
         let abort_handle = ctx
             .spawn_abortable(
@@ -12902,7 +12902,7 @@ impl Input {
                                         shell_replacement_span,
                                         &buffer_text,
                                         cursor_position,
-                                        path_separators,
+                                        &path_separators,
                                     )
                                 });
                         let suggestions = match native_suggestions {
@@ -12949,7 +12949,7 @@ impl Input {
                                     shell_replacement_span,
                                     &buffer_text,
                                     cursor_position,
-                                    path_separators,
+                                    &path_separators,
                                 )
                             }),
                     };
@@ -13002,7 +13002,7 @@ impl Input {
             results_tx,
         });
         let completion_session = completion_context.session.clone();
-        let path_separators = self.path_separators(ctx).all;
+        let path_separators = self.path_separators(ctx);
 
         let abort_handle = ctx
             .spawn_abortable(
@@ -13013,7 +13013,7 @@ impl Input {
                             span,
                             &buffer_text,
                             cursor_position,
-                            path_separators,
+                            &path_separators,
                         )
                     });
                     let suggestions = match native_suggestions {

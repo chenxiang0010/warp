@@ -4419,6 +4419,67 @@ fn native_completions_for_a_forward_slash_token_open_the_menu() {
     });
 }
 
+/// A bare token has no separator to mirror, but accepting its completion must still keep the
+/// token open: `z scoop<TAB>` has to insert `scoop\` (not `.\scoop `), otherwise the trailing
+/// space terminates the token and the next Tab cannot descend into the directory.
+#[test]
+fn native_completion_for_a_bare_token_keeps_the_directory_open() {
+    let _native_completions_flag = FeatureFlag::NativeShellCompletions.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        app.update(|ctx| {
+            InputSettings::handle(ctx).update(ctx, |settings, ctx| {
+                settings
+                    .warp_completions_enabled
+                    .set_value(true, ctx)
+                    .expect("Warp completions setting must update");
+                settings
+                    .native_shell_completions_enabled
+                    .set_value(true, ctx)
+                    .expect("native completions setting must update");
+            });
+        });
+
+        let session_info = SessionInfo::new_for_test();
+        let session_id = session_info.session_id;
+        let terminal =
+            add_window_with_bootstrapped_terminal(&mut app, None, Some(session_info)).await;
+        simulate_directory_for_completion(session_id, &terminal, &mut app, "/usr/bin");
+        respond_to_native_shell_completions(
+            &mut app,
+            &terminal,
+            vec![directory_completion(r".\scoop")],
+        );
+        let input = terminal.read(&app, |terminal, _| terminal.input().clone());
+
+        input.update(&mut app, |input, ctx| {
+            input.clear_buffer_and_reset_undo_stack(ctx);
+            input.user_insert("z scoop", ctx);
+            input.input_tab(ctx);
+        });
+
+        assert_eventually!(
+            600 => input.read(&app, |input, ctx| input.buffer_text(ctx) != "z scoop"),
+            "a bare-token completion must be accepted"
+        );
+
+        let text = input.read(&app, |input, ctx| input.buffer_text(ctx));
+        assert_eq!(
+            text, "z scoop\\",
+            "the completion must drop PowerShell's `./` prefix, keep the session separator, and \
+             not append a space"
+        );
+    });
+}
+
+/// Builds a `ShellCompletion` that the shell reported as a directory.
+fn directory_completion(name: &str) -> ShellCompletion {
+    let mut completion = ShellCompletion::new(name.to_string());
+    completion.update(ShellCompletionUpdate::IsDirectory { value: true });
+    completion
+}
+
 #[test]
 fn input_tab_asks_the_shell_once_when_bundled_specs_are_empty() {
     let _native_completions_flag = FeatureFlag::NativeShellCompletions.override_enabled(true);
@@ -4467,7 +4528,7 @@ fn native_shell_replacement_span_is_clamped_into_the_buffer_before_the_cursor() 
         Some(Span::new(3, 8)),
         buffer_text,
         cursor_position,
-        &['/'],
+        &PathSeparators::for_unix(),
     );
     assert_eq!(
         honored.replacement_span,
@@ -4480,7 +4541,7 @@ fn native_shell_replacement_span_is_clamped_into_the_buffer_before_the_cursor() 
         Some(Span::new(1_000_000, 1_000_001)),
         buffer_text,
         cursor_position,
-        &['/'],
+        &PathSeparators::for_unix(),
     );
     assert_eq!(out_of_range.replacement_span, Span::new(8, 8));
 
@@ -4489,7 +4550,7 @@ fn native_shell_replacement_span_is_clamped_into_the_buffer_before_the_cursor() 
         Some(Span::new(usize::MAX, usize::MAX)),
         buffer_text,
         cursor_position,
-        &['/'],
+        &PathSeparators::for_unix(),
     );
     assert_eq!(saturated.replacement_span, Span::new(8, 8));
 }
@@ -4504,7 +4565,7 @@ fn native_shell_replacement_span_is_clamped_to_the_cursor_not_the_whole_buffer()
         Some(Span::new(12, 16)),
         buffer_text,
         cursor_position,
-        &['/'],
+        &PathSeparators::for_unix(),
     );
 
     assert_eq!(results.replacement_span, Span::new(8, 8));
@@ -4514,8 +4575,13 @@ fn native_shell_replacement_span_is_clamped_to_the_cursor_not_the_whole_buffer()
 fn native_shell_replacement_span_falls_back_to_the_whitespace_token_when_none_is_reported() {
     let buffer_text = "cd app/D";
 
-    let results =
-        native_shell_suggestion_results(Vec::new(), None, buffer_text, buffer_text.len(), &['/']);
+    let results = native_shell_suggestion_results(
+        Vec::new(),
+        None,
+        buffer_text,
+        buffer_text.len(),
+        &PathSeparators::for_unix(),
+    );
 
     assert_eq!(results.replacement_span, Span::new(3, 8));
 }
@@ -4526,7 +4592,7 @@ fn native_shell_replacement_span_falls_back_to_the_whitespace_token_when_none_is
 #[test]
 fn native_completions_are_rewritten_to_the_separator_the_user_typed() {
     let buffer_text = "z scoop/buckets/c";
-    let windows_separators: &[char] = &['/', '\\'];
+    let windows_separators = PathSeparators::for_windows();
 
     let results = native_shell_suggestion_results(
         vec![
@@ -4536,7 +4602,7 @@ fn native_completions_are_rewritten_to_the_separator_the_user_typed() {
         None,
         buffer_text,
         buffer_text.len(),
-        windows_separators,
+        &windows_separators,
     );
 
     let displays: Vec<&str> = results
@@ -4563,7 +4629,7 @@ fn native_completions_keep_backslashes_for_a_backslash_token() {
         None,
         buffer_text,
         buffer_text.len(),
-        &['/', '\\'],
+        &PathSeparators::for_windows(),
     );
 
     assert_eq!(results.suggestions[0].display(), r"scoop\buckets\custom");
@@ -4582,7 +4648,7 @@ fn native_directory_completions_get_a_trailing_separator() {
         None,
         buffer_text,
         buffer_text.len(),
-        &['/', '\\'],
+        &PathSeparators::for_windows(),
     );
 
     assert_eq!(results.suggestions[0].display(), "scoop/buckets/");
@@ -4599,7 +4665,7 @@ fn native_file_completions_do_not_get_a_trailing_separator() {
         None,
         buffer_text,
         buffer_text.len(),
-        &['/', '\\'],
+        &PathSeparators::for_windows(),
     );
 
     assert_eq!(results.suggestions[0].display(), "scoop/buckets/README.md");

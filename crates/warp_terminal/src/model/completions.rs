@@ -1,5 +1,5 @@
 use warp_completer::completer::{
-    EngineFileType, Match, MatchedSuggestion, Suggestion, SuggestionType,
+    EngineFileType, Match, MatchedSuggestion, PathSeparators, Suggestion, SuggestionType,
 };
 
 /// A completion result that was produced natively by the shell.
@@ -67,20 +67,8 @@ impl ShellCompletion {
     ///
     /// Directories get the typed separator appended (shells omit it), so accepting the
     /// completion keeps the token open for the next path level instead of terminating it.
-    pub fn normalized_for_query(&self, query: &str, path_separators: &[char]) -> Self {
-        let typed_separator = query
-            .chars()
-            .rev()
-            .find(|character| path_separators.contains(character))
-            .or_else(|| {
-                query
-                    .chars()
-                    .find(|character| path_separators.contains(character))
-            });
-
-        let Some(typed_separator) = typed_separator else {
-            return self.clone();
-        };
+    pub fn normalized_for_query(&self, query: &str, path_separators: &PathSeparators) -> Self {
+        let separators = path_separators.all;
 
         // `.\foo` / `./foo` are how PowerShell spells a path relative to the working directory.
         // Strip the prefix only when the user's own token does not already carry one, otherwise
@@ -94,10 +82,24 @@ impl ShellCompletion {
                 .unwrap_or(&self.name)
         };
 
+        // Prefer the separator the user typed, so a `scoop/buckets/` token keeps completing with
+        // `/`. A bare token like `scoop` carries none; fall back to the session's main separator
+        // so directories still get a trailing separator and the next Tab descends into them.
+        let typed_separator = query
+            .chars()
+            .rev()
+            .find(|character| separators.contains(character))
+            .or_else(|| {
+                query
+                    .chars()
+                    .find(|character| separators.contains(character))
+            })
+            .unwrap_or(path_separators.main);
+
         let mut normalized: String = name
             .chars()
             .map(|character| {
-                if path_separators.contains(&character) {
+                if separators.contains(&character) {
                     typed_separator
                 } else {
                     character
@@ -109,7 +111,7 @@ impl ShellCompletion {
             && !normalized
                 .chars()
                 .next_back()
-                .is_some_and(|character| path_separators.contains(&character))
+                .is_some_and(|character| separators.contains(&character))
         {
             normalized.push(typed_separator);
         }
