@@ -1643,8 +1643,8 @@ fn native_shell_suggestion_results(
     shell_replacement_span: Option<Span>,
     buffer_text: &str,
     cursor_position: usize,
+    path_separators: &[char],
 ) -> SuggestionResults {
-    let suggestions = shell_results.into_iter().map(Into::into).collect_vec();
     let buffer_text_before_cursor = &buffer_text[0..cursor_position];
     let replacement_span = match shell_replacement_span {
         Some(span) => span.clamped_to(buffer_text_before_cursor),
@@ -1659,6 +1659,12 @@ fn native_shell_suggestion_results(
             (token_start, cursor_position).into()
         }
     };
+    let query = replacement_span.slice(buffer_text_before_cursor);
+    let suggestions = shell_results
+        .into_iter()
+        .map(|completion| completion.normalized_for_query(query, path_separators))
+        .map(Into::into)
+        .collect_vec();
     SuggestionResults {
         replacement_span,
         suggestions,
@@ -12881,6 +12887,7 @@ impl Input {
         };
 
         let completion_session = completion_context.session.clone();
+        let path_separators = self.path_separators(ctx).all;
 
         let abort_handle = ctx
             .spawn_abortable(
@@ -12895,6 +12902,7 @@ impl Input {
                                         shell_replacement_span,
                                         &buffer_text,
                                         cursor_position,
+                                        path_separators,
                                     )
                                 });
                         let suggestions = match native_suggestions {
@@ -12941,6 +12949,7 @@ impl Input {
                                     shell_replacement_span,
                                     &buffer_text,
                                     cursor_position,
+                                    path_separators,
                                 )
                             }),
                     };
@@ -12993,6 +13002,7 @@ impl Input {
             results_tx,
         });
         let completion_session = completion_context.session.clone();
+        let path_separators = self.path_separators(ctx).all;
 
         let abort_handle = ctx
             .spawn_abortable(
@@ -13003,6 +13013,7 @@ impl Input {
                             span,
                             &buffer_text,
                             cursor_position,
+                            path_separators,
                         )
                     });
                     let suggestions = match native_suggestions {
@@ -13380,16 +13391,21 @@ impl Input {
             let cursor_end_offset = input.end_byte_index_of_last_selection(ctx);
 
             // Add a space to the end if the end of the selection/replacement is at the end of the
-            // buffer and the completion result doesn't end with a slash or an equals sign. A
-            // trailing slash means more of a path follows; a trailing `=` (e.g. `--color=`) means a
-            // value follows directly, as shells' own `-S '='` completions do.
+            // buffer and the completion result doesn't end with a path separator or an equals
+            // sign. A trailing separator means more of a path follows; a trailing `=` (e.g.
+            // `--color=`) means a value follows directly, as shells' own `-S '='` completions do.
+            // Every separator the session accepts has to be checked, not just the OS one, so that
+            // a completion ending in `/` on Windows doesn't get a trailing space either.
             // If completions as you type is turned on and classic completions is off, then
             // _don't_ add a space.
             let is_classic_completions_enabled = self.is_classic_completions_enabled(ctx);
             let replacement: Cow<str> = if (!is_completions_as_you_type_enabled
                 || is_classic_completions_enabled)
                 && cursor_end_offset.as_usize() == input.buffer_text(ctx).len()
-                && !completion_result.ends_with(self.path_separators(ctx).main)
+                && !completion_result
+                    .chars()
+                    .next_back()
+                    .is_some_and(|separator| self.path_separators(ctx).all.contains(&separator))
                 && !completion_result.ends_with('=')
                 && executing == Executing::No
             {

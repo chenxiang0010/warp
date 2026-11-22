@@ -31,6 +31,7 @@ struct MockHandler {
     should_validate_dcs_hook_session_id: bool,
     completion_results: Vec<ShellCompletion>,
     completion_description_updates: Vec<String>,
+    completion_directory_updates: usize,
     replacement_spans: Vec<(usize, usize)>,
 }
 
@@ -273,6 +274,9 @@ impl Handler for MockHandler {
             ShellCompletionUpdate::Description { value } => {
                 self.completion_description_updates.push(value)
             }
+            ShellCompletionUpdate::IsDirectory { .. } => {
+                self.completion_directory_updates += 1;
+            }
         }
     }
 
@@ -309,6 +313,7 @@ impl Default for MockHandler {
             should_validate_dcs_hook_session_id: true,
             completion_results: Vec::new(),
             completion_description_updates: Vec::new(),
+            completion_directory_updates: 0,
             replacement_spans: Vec::new(),
         }
     }
@@ -1572,6 +1577,14 @@ fn osc_completions_match_result_skips_on_malformed_hex_payload() {
     let (_, handler) = parse_bytes(bytes);
 
     assert!(handler.completion_results.is_empty());
+}
+
+#[test]
+fn osc_completions_directory_marker_marks_the_last_result() {
+    let bytes: &[u8] = b"\x1b]9280;D?directory;1\x07";
+    let (_, handler) = parse_bytes(bytes);
+
+    assert_eq!(handler.completion_directory_updates, 1);
 }
 
 #[test]

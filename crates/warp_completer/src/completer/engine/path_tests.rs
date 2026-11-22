@@ -81,6 +81,68 @@ fn split_path_keeps_escaped_leading_tilde_relative_to_pwd() {
     assert_eq!(split.directory_relative_path_name, r"\~/");
 }
 
+/// A directory suggestion must keep the separator the user typed instead of switching to the
+/// session's main separator, otherwise `scoop/buckets/` completes to `scoop/buckets/custom\`.
+#[test]
+fn directory_suggestion_separator_mirrors_the_typed_separator() {
+    let windows = PathSeparators::for_windows();
+    let unix = PathSeparators::for_unix();
+    let pwd = TypedPathBuf::from_unix("/work");
+
+    let forward_slash_split = SplitPath::new(pwd.to_path(), "scoop/buckets/", None, windows.all);
+    assert_eq!(
+        directory_suggestion_separator(&forward_slash_split, &windows),
+        '/'
+    );
+
+    let backslash_split = SplitPath::new(pwd.to_path(), r"scoop\buckets\", None, windows.all);
+    assert_eq!(
+        directory_suggestion_separator(&backslash_split, &windows),
+        '\\'
+    );
+
+    // A token with no separator has nothing to mirror, so the main separator wins.
+    let bare_split = SplitPath::new(pwd.to_path(), "scoop", None, windows.all);
+    assert_eq!(directory_suggestion_separator(&bare_split, &windows), '\\');
+    assert_eq!(directory_suggestion_separator(&bare_split, &unix), '/');
+
+    // An empty token completes inside pwd, which also has nothing to mirror.
+    let empty_split = SplitPath::new(pwd.to_path(), "", None, windows.all);
+    assert_eq!(directory_suggestion_separator(&empty_split, &windows), '\\');
+}
+
+/// The appended separator must not be taken from a separator that the session does not accept.
+/// A `\` inside a Unix-session token is a literal character, not a separator.
+#[test]
+fn directory_suggestion_separator_ignores_separators_the_session_rejects() {
+    let unix = PathSeparators::for_unix();
+    let pwd = TypedPathBuf::from_unix("/work");
+    let split = SplitPath::new(pwd.to_path(), r"a\b", None, unix.all);
+
+    assert_eq!(directory_suggestion_separator(&split, &unix), '/');
+}
+
+/// End-to-end check that a `/`-terminated token produces `/`-terminated directory suggestions
+/// even when the session's main separator is `\`.
+#[cfg(windows)]
+#[test]
+fn forward_slash_token_completes_directories_with_forward_slashes() {
+    let ctx = MockPathCompletionContext::new(TypedPathBuf::from_windows(r"C:\work"))
+        .with_path_separators(PathSeparators::for_windows())
+        .with_entries_in_pwd([dir_entry("src"), dir_entry("target")]);
+
+    let displays: Vec<String> = warpui_core::r#async::block_on(sorted_directories_relative_to(
+        &ParsedToken::new("./"),
+        MatchStrategy::CaseInsensitive,
+        &ctx,
+    ))
+    .into_iter()
+    .map(|matched| matched.suggestion.display.to_string())
+    .collect();
+
+    assert_eq!(displays, vec!["src/", "target/"]);
+}
+
 #[test]
 fn cdpath_expands_session_home_with_unix_separators_on_any_host() {
     let ctx = MockPathCompletionContext::new(TypedPathBuf::from_unix("/work"))

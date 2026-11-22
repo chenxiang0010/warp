@@ -1252,6 +1252,11 @@ where
                                 ShellCompletionUpdate::Description { value },
                             );
                         }
+                        "directory" => {
+                            self.handler.update_last_completion_result(
+                                ShellCompletionUpdate::IsDirectory { value: true },
+                            );
+                        }
                         _ => {
                             safe_warn!(
                                 safe: (

@@ -2384,3 +2384,40 @@ fn test_powershell_parser_directives_for_case_insensitivity() {
         vec!["-Force"]
     );
 }
+
+/// A shell alias for a command whose signature has no path-typed argument still needs path
+/// completions for the token being completed. `z` is the canonical case: the user aliases it to
+/// zoxide, whose `query` argument is untyped, so the only path source is the fallback.
+#[test]
+pub fn test_alias_to_untyped_command_still_completes_paths() {
+    let registry = create_test_command_registry([]);
+    let pwd = TypedPathBuf::from(TEST_WORK_DIR);
+    let path_ctx = MockPathCompletionContext::new(pwd.clone())
+        .with_home_directory(TEST_WORK_DIR.to_owned())
+        .with_entries_in_pwd([EngineDirEntry::test_dir("scoop")])
+        .with_entries(pwd.join("scoop/"), [EngineDirEntry::test_dir("buckets")])
+        .with_entries(
+            pwd.join("scoop/buckets/"),
+            [
+                EngineDirEntry::test_dir("custom"),
+                EngineDirEntry::test_dir("main"),
+            ],
+        );
+
+    let aliases = HashMap::from_iter([("z".into(), "zoxide query".to_string())]);
+    let ctx = FakeCompletionContext::new(registry)
+        .with_path_completion_context(path_ctx)
+        .with_aliases(aliases)
+        .with_top_level_commands(["z", "zoxide"]);
+
+    // No separator in the token yet: the fallback completes entries in pwd.
+    assert_eq!(complete_at_end_of_line("z ", &ctx), vec!["scoop/"]);
+
+    // A token that already contains a separator completes the next path level, for both
+    // separator styles, and keeps the separator the user typed.
+    assert_eq!(complete_at_end_of_line("z scoop/", &ctx), vec!["buckets/"]);
+    assert_eq!(
+        complete_at_end_of_line("z scoop/buckets/", &ctx),
+        vec!["custom/", "main/"]
+    );
+}

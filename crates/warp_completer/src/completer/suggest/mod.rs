@@ -318,9 +318,9 @@ impl SuggestionResults {
         // We build up the suggestions to avoid having to iterate over the
         // same set of suggestions multiple times. This is performance-sensitive code.
         // Note that the suggestions in these sets are mutually exclusive.
-        let mut exact_match_suggestion: Option<(Match, &Suggestion)> = None;
-        let mut case_insensitive_exact_match_suggestion: Option<(Match, &Suggestion)> = None;
-        let mut prefix_suggestions = vec![];
+        let mut exact_match_suggestion: Option<(Match, &Suggestion, usize)> = None;
+        let mut case_insensitive_exact_match_suggestion: Option<(Match, &Suggestion, usize)> = None;
+        let mut prefix_suggestions: Vec<(Match, &Suggestion, usize)> = vec![];
         let mut fuzzy_suggestions = vec![];
 
         // TODO: In the future, we won't be including the entire filepath
@@ -336,24 +336,50 @@ impl SuggestionResults {
             .map_or(query, |(_, after_last_slash)| after_last_slash);
         let file_query_len = file_query.chars().count();
 
+        // Native shell completions return absolute paths even when the query starts with a
+        // tilde (e.g. `~/D` yields `C:\Users\you\Desktop` on Windows), so a query containing a
+        // literal `~` never matches those candidates. Fall back to the query with the tilde and
+        // one trailing path separator stripped so they aren't all dropped.
+        let tilde_query = query.strip_prefix('~').map(|suffix| {
+            let suffix = suffix
+                .strip_prefix(|separator: char| path_separators.contains(&separator))
+                .unwrap_or(suffix);
+            (suffix, suffix.chars().count())
+        });
+
         for suggestion in self.suggestions.iter() {
             // This is a very ad-hoc way of overcoming the problem of the query containing
             // the entire filepath (i.e. `app/src/platform.rs` as opposed to just the final `platform.rs`).
             // The reason we need to change the query is that we still want to use `suggestion.display()`
             // since that will yield the best fuzzy scores (vs. a large prefix matching). However,
             // we still compare the whole query to the replacement to see if there is a match at all to begin with.
-            let query_for_suggestion = if suggestion.suggestion.file_type.is_some() {
-                if self
+            let (query_for_suggestion, matched_query_len) =
+                if suggestion.suggestion.file_type.is_some() {
+                    if self
+                        .match_strategy
+                        .get_match_type(query, suggestion.replacement())
+                        .is_none()
+                        && tilde_query.is_none_or(|(query, _)| {
+                            self.match_strategy
+                                .get_match_type(query, suggestion.replacement())
+                                .is_none()
+                        })
+                    {
+                        continue;
+                    }
+                    (file_query, file_query_len)
+                } else if self
                     .match_strategy
-                    .get_match_type(query, suggestion.replacement())
-                    .is_none()
+                    .get_match_type(query, suggestion.display())
+                    .is_some()
                 {
-                    continue;
-                }
-                file_query
-            } else {
-                query
-            };
+                    (query, original_query_len)
+                } else {
+                    match tilde_query {
+                        Some((query, len)) => (query, len),
+                        None => continue,
+                    }
+                };
 
             if let Some(match_type) = self
                 .match_strategy
@@ -375,6 +401,7 @@ impl SuggestionResults {
                                 is_case_sensitive: true,
                             },
                             &suggestion.suggestion,
+                            matched_query_len,
                         ));
                     }
                     Match::Exact {
@@ -385,10 +412,14 @@ impl SuggestionResults {
                                 is_case_sensitive: false,
                             },
                             &suggestion.suggestion,
+                            matched_query_len,
                         ));
                     }
-                    Match::Prefix { is_case_sensitive } => prefix_suggestions
-                        .push((Match::Prefix { is_case_sensitive }, &suggestion.suggestion)),
+                    Match::Prefix { is_case_sensitive } => prefix_suggestions.push((
+                        Match::Prefix { is_case_sensitive },
+                        &suggestion.suggestion,
+                        matched_query_len,
+                    )),
                     Match::Fuzzy { ref match_result } => {
                         // Note that if display and replacement differ, then this could
                         // produce the wrong set of matching indices depending on query.
@@ -410,27 +441,16 @@ impl SuggestionResults {
                     .into_iter()
                     .sorted_by_key(|(_, _, score)| *score)
                     .rev()
-                    .map(|(match_type, matched_suggestion, _)| (match_type, matched_suggestion)),
+                    .map(|(match_type, matched_suggestion, _)| (match_type, matched_suggestion, 0)),
             )
-            .map(move |(match_type, suggestion)| {
+            .map(move |(match_type, suggestion, matched_query_len)| {
                 let telemetry_match_type = match_type.clone().into();
                 match match_type {
-                    Match::Prefix { .. } | Match::Exact { .. } => {
-                        // Similar to above, we should use the appropriate length
-                        // depending on which query we used (which is dependent on
-                        // whether the suggestion is a file path or not).
-                        let len = if suggestion.file_type.is_some() {
-                            file_query_len
-                        } else {
-                            original_query_len
-                        };
-                        let matching_indices = (0..len).collect();
-                        FilteredSuggestion {
-                            suggestion,
-                            matching_indices,
-                            match_type: telemetry_match_type,
-                        }
-                    }
+                    Match::Prefix { .. } | Match::Exact { .. } => FilteredSuggestion {
+                        suggestion,
+                        matching_indices: (0..matched_query_len).collect(),
+                        match_type: telemetry_match_type,
+                    },
                     Match::Fuzzy { match_result } => FilteredSuggestion {
                         suggestion,
                         matching_indices: match_result.matched_indices,

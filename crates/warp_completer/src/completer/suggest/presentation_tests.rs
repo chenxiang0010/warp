@@ -2,7 +2,7 @@ use super::{
     ExplicitTabCompletion, MatchedSuggestion, Priority, Suggestion, SuggestionResults,
     SuggestionType,
 };
-use crate::completer::{MatchStrategy, MatchType, TopLevelCommandCaseSensitivity};
+use crate::completer::{EngineFileType, MatchStrategy, MatchType, TopLevelCommandCaseSensitivity};
 use crate::meta::Span;
 
 const PATH_SEPARATORS: &[char] = &['/'];
@@ -26,6 +26,43 @@ fn results(query: &str, displays: &[&str]) -> SuggestionResults {
         suggestions: displays
             .iter()
             .map(|display| matched_suggestion(display, query))
+            .collect(),
+        match_strategy: MatchStrategy::Fuzzy,
+    }
+}
+
+// Mirrors native shell completions: the pre-stored match type is computed against the
+// tilde-stripped query because the candidates are absolute paths.
+fn absolute_path_results(stripped_query: &str, displays: &[&str]) -> SuggestionResults {
+    SuggestionResults {
+        replacement_span: Span::new(0, 0),
+        suggestions: displays
+            .iter()
+            .map(|display| matched_suggestion(display, stripped_query))
+            .collect(),
+        match_strategy: MatchStrategy::Fuzzy,
+    }
+}
+
+fn file_results(stripped_query: &str, files: &[(&str, &str)]) -> SuggestionResults {
+    SuggestionResults {
+        replacement_span: Span::new(0, 0),
+        suggestions: files
+            .iter()
+            .map(|&(display, replacement)| {
+                let mut suggestion = Suggestion::with_same_display_and_replacement(
+                    display,
+                    None,
+                    SuggestionType::Argument,
+                    Priority::default(),
+                );
+                suggestion.replacement = replacement.into();
+                suggestion.file_type = Some(EngineFileType::Directory);
+                let match_type = MatchStrategy::Fuzzy
+                    .get_match_type(stripped_query, display)
+                    .expect("test file suggestion should match its stripped query");
+                MatchedSuggestion::new(suggestion, match_type)
+            })
             .collect(),
         match_strategy: MatchStrategy::Fuzzy,
     }
@@ -123,4 +160,44 @@ fn explicit_tab_computes_common_prefixes_on_utf8_boundaries() {
         panic!("the shared Unicode prefix should be inserted");
     };
     assert_eq!(common_prefix, "éc");
+}
+
+#[test]
+fn explicit_tab_opens_the_menu_for_a_tilde_query_on_absolute_paths() {
+    let results = absolute_path_results("D", &[r"C:\Users\user\Docs", r"C:\Users\user\Desktop"]);
+
+    let ExplicitTabCompletion::Open { suggestions, .. } =
+        results.explicit_tab_completion("~/D", PATH_SEPARATORS)
+    else {
+        panic!("a tilde-prefixed query should open the menu for absolute path candidates");
+    };
+    let mut displays = suggestions
+        .iter()
+        .map(|suggestion| suggestion.suggestion.display.as_str())
+        .collect::<Vec<_>>();
+    displays.sort_unstable();
+    assert_eq!(displays, [r"C:\Users\user\Desktop", r"C:\Users\user\Docs"]);
+}
+
+#[test]
+fn tilde_query_matching_indices_track_the_stripped_query() {
+    let results = absolute_path_results("D", &[r"C:\Users\user\Desktop"]);
+
+    let prepared = results.prepare_for_query("~/D", PATH_SEPARATORS);
+
+    assert_eq!(prepared.len(), 1);
+    // The stripped query "D" matches the first letter of the basename.
+    assert_eq!(prepared[0].matching_indices, [14]);
+}
+
+#[test]
+fn tilde_query_inserts_the_expanded_file_candidate() {
+    let results = file_results("Desktop", &[("Desktop", r"C:\Users\user\Desktop")]);
+
+    let ExplicitTabCompletion::InsertSingle { suggestion, .. } =
+        results.explicit_tab_completion("~/Desktop", PATH_SEPARATORS)
+    else {
+        panic!("the expanded file candidate should be inserted for the tilde query");
+    };
+    assert_eq!(suggestion.suggestion.replacement, r"C:\Users\user\Desktop");
 }

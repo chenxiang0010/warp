@@ -855,6 +855,12 @@ $null = New-Module -Name Warp-Module -ScriptBlock {
                 }
                 foreach ($match in $completion.CompletionMatches) {
                     Write-Host -NoNewline "$([char]0x1b)]9280;C;$(Warp-Encode-HexString $match.CompletionText)$oscEnd"
+                    # Directories come back without a trailing separator. Mark them so the client
+                    # can append one; otherwise accepting the completion adds a space and the next
+                    # Tab can't descend into the directory.
+                    if ($match.ResultType -eq [System.Management.Automation.CompletionResultType]::ProviderContainer) {
+                        Write-Host -NoNewline "$([char]0x1b)]9280;D?directory;1$oscEnd"
+                    }
                     if (-not [string]::IsNullOrEmpty($match.ToolTip) -and $match.ToolTip -ne $match.CompletionText) {
                         # Cmdlet/parameter tooltips can span multiple lines; collapse to one line.
                         $description = ($match.ToolTip -split '\r?\n' | Where-Object { $_.Trim() -ne '' }) -join ' '

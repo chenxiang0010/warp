@@ -96,6 +96,7 @@ use crate::terminal::model::ansi::{
 };
 use crate::terminal::model::block::{BlockId, SerializedBlock};
 use crate::terminal::model::blocks::{BlockListPoint, insert_block};
+use crate::terminal::model::completions::ShellCompletionUpdate;
 use crate::terminal::model::grid::Dimensions as _;
 use crate::terminal::model::index::Side;
 use crate::terminal::model::session::command_executor::{CommandExecutor, ExecuteCommandOptions};
@@ -4362,6 +4363,62 @@ fn input_tab_does_not_ask_the_shell_when_bundled_specs_are_non_empty() {
     });
 }
 
+/// End-to-end reproduction of the `z scoop/buckets/<TAB>` symptom: PowerShell answers in
+/// canonical `\` form, so without rewriting the separators the `/`-typed query matches nothing
+/// and the menu never opens.
+#[test]
+fn native_completions_for_a_forward_slash_token_open_the_menu() {
+    let _native_completions_flag = FeatureFlag::NativeShellCompletions.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        app.update(|ctx| {
+            InputSettings::handle(ctx).update(ctx, |settings, ctx| {
+                settings
+                    .warp_completions_enabled
+                    .set_value(true, ctx)
+                    .expect("Warp completions setting must update");
+                settings
+                    .native_shell_completions_enabled
+                    .set_value(true, ctx)
+                    .expect("native completions setting must update");
+            });
+        });
+
+        let session_info = SessionInfo::new_for_test();
+        let session_id = session_info.session_id;
+        let terminal =
+            add_window_with_bootstrapped_terminal(&mut app, None, Some(session_info)).await;
+        simulate_directory_for_completion(session_id, &terminal, &mut app, "/usr/bin");
+        respond_to_native_shell_completions(
+            &mut app,
+            &terminal,
+            vec![
+                ShellCompletion::new(r".\scoop\buckets\custom".to_string()),
+                ShellCompletion::new(r".\scoop\buckets\cmontage_scoopbucket-third".to_string()),
+            ],
+        );
+        let input = terminal.read(&app, |terminal, _| terminal.input().clone());
+
+        input.update(&mut app, |input, ctx| {
+            input.clear_buffer_and_reset_undo_stack(ctx);
+            input.user_insert("z scoop/buckets/c", ctx);
+            input.input_tab(ctx);
+        });
+
+        assert_eventually!(
+            600 => input.read(&app, |input, _ctx| {
+                input.input_suggestions.read(&app, |suggestions, _| {
+                    let items = suggestions.items().iter().map(|item| item.text()).collect_vec();
+                    items.contains(&"scoop/buckets/custom")
+                        && items.contains(&"scoop/buckets/cmontage_scoopbucket-third")
+                })
+            }),
+            "a forward-slash token must still match completions the shell reported with backslashes"
+        );
+    });
+}
+
 #[test]
 fn input_tab_asks_the_shell_once_when_bundled_specs_are_empty() {
     let _native_completions_flag = FeatureFlag::NativeShellCompletions.override_enabled(true);
@@ -4410,6 +4467,7 @@ fn native_shell_replacement_span_is_clamped_into_the_buffer_before_the_cursor() 
         Some(Span::new(3, 8)),
         buffer_text,
         cursor_position,
+        &['/'],
     );
     assert_eq!(
         honored.replacement_span,
@@ -4422,6 +4480,7 @@ fn native_shell_replacement_span_is_clamped_into_the_buffer_before_the_cursor() 
         Some(Span::new(1_000_000, 1_000_001)),
         buffer_text,
         cursor_position,
+        &['/'],
     );
     assert_eq!(out_of_range.replacement_span, Span::new(8, 8));
 
@@ -4430,6 +4489,7 @@ fn native_shell_replacement_span_is_clamped_into_the_buffer_before_the_cursor() 
         Some(Span::new(usize::MAX, usize::MAX)),
         buffer_text,
         cursor_position,
+        &['/'],
     );
     assert_eq!(saturated.replacement_span, Span::new(8, 8));
 }
@@ -4444,6 +4504,7 @@ fn native_shell_replacement_span_is_clamped_to_the_cursor_not_the_whole_buffer()
         Some(Span::new(12, 16)),
         buffer_text,
         cursor_position,
+        &['/'],
     );
 
     assert_eq!(results.replacement_span, Span::new(8, 8));
@@ -4453,9 +4514,95 @@ fn native_shell_replacement_span_is_clamped_to_the_cursor_not_the_whole_buffer()
 fn native_shell_replacement_span_falls_back_to_the_whitespace_token_when_none_is_reported() {
     let buffer_text = "cd app/D";
 
-    let results = native_shell_suggestion_results(Vec::new(), None, buffer_text, buffer_text.len());
+    let results =
+        native_shell_suggestion_results(Vec::new(), None, buffer_text, buffer_text.len(), &['/']);
 
     assert_eq!(results.replacement_span, Span::new(3, 8));
+}
+
+/// PowerShell reports completions in canonical `\` form with a `.\` prefix, regardless of the
+/// separator the user typed. Rewriting them to the typed separator is what lets a `/`-typed
+/// token match its candidates at all.
+#[test]
+fn native_completions_are_rewritten_to_the_separator_the_user_typed() {
+    let buffer_text = "z scoop/buckets/c";
+    let windows_separators: &[char] = &['/', '\\'];
+
+    let results = native_shell_suggestion_results(
+        vec![
+            ShellCompletion::new(r".\scoop\buckets\custom".to_string()),
+            ShellCompletion::new(r".\scoop\buckets\cmontage_scoopbucket-third".to_string()),
+        ],
+        None,
+        buffer_text,
+        buffer_text.len(),
+        windows_separators,
+    );
+
+    let displays: Vec<&str> = results
+        .suggestions
+        .iter()
+        .map(|suggestion| suggestion.display())
+        .collect();
+    assert_eq!(
+        displays,
+        vec![
+            "scoop/buckets/custom",
+            "scoop/buckets/cmontage_scoopbucket-third"
+        ]
+    );
+}
+
+/// A backslash-typed token keeps backslashes, so users who prefer `\` are unaffected.
+#[test]
+fn native_completions_keep_backslashes_for_a_backslash_token() {
+    let buffer_text = r"z scoop\buckets\c";
+
+    let results = native_shell_suggestion_results(
+        vec![ShellCompletion::new(r".\scoop\buckets\custom".to_string())],
+        None,
+        buffer_text,
+        buffer_text.len(),
+        &['/', '\\'],
+    );
+
+    assert_eq!(results.suggestions[0].display(), r"scoop\buckets\custom");
+}
+
+/// A directory completion must keep the token open. Without a trailing separator, accepting it
+/// appends a space and the next Tab can no longer descend into the directory.
+#[test]
+fn native_directory_completions_get_a_trailing_separator() {
+    let buffer_text = "z scoop/";
+    let mut directory = ShellCompletion::new(r".\scoop\buckets".to_string());
+    directory.update(ShellCompletionUpdate::IsDirectory { value: true });
+
+    let results = native_shell_suggestion_results(
+        vec![directory],
+        None,
+        buffer_text,
+        buffer_text.len(),
+        &['/', '\\'],
+    );
+
+    assert_eq!(results.suggestions[0].display(), "scoop/buckets/");
+}
+
+/// A file completion must not get a trailing separator: a space is the right thing to add next.
+#[test]
+fn native_file_completions_do_not_get_a_trailing_separator() {
+    let buffer_text = "z scoop/buckets/RE";
+    let results = native_shell_suggestion_results(
+        vec![ShellCompletion::new(
+            r".\scoop\buckets\README.md".to_string(),
+        )],
+        None,
+        buffer_text,
+        buffer_text.len(),
+        &['/', '\\'],
+    );
+
+    assert_eq!(results.suggestions[0].display(), "scoop/buckets/README.md");
 }
 
 #[test]

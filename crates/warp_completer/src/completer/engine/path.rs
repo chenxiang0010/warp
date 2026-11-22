@@ -288,6 +288,8 @@ async fn list_directory_contents(
         path_separators.all,
     );
 
+    let typed_separator = directory_suggestion_separator(&split_path, &path_separators);
+
     let dir_entries = ctx
         .list_directory_entries(split_path.directory_absolute_path.clone())
         .await;
@@ -313,7 +315,7 @@ async fn list_directory_contents(
                 ROOT_DIR_STR.to_owned()
             } else {
                 if entry.is_dir() {
-                    file_name.push(path_separators.main);
+                    file_name.push(typed_separator);
                 }
                 // We use `shell_escape()` instead of `escape()` on the relative path name to allow
                 // home directory expansion if needed.
@@ -356,6 +358,23 @@ async fn list_directory_contents(
             })
         })
         .collect_vec()
+}
+
+/// The separator to append to a completed directory name.
+///
+/// Mirrors the separator the user actually typed so a token written with `/` keeps completing
+/// with `/` even on a host whose main separator is `\`. Falls back to the session's main
+/// separator when the token being completed contains no separator at all.
+fn directory_suggestion_separator(
+    split_path: &SplitPath,
+    path_separators: &PathSeparators,
+) -> char {
+    split_path
+        .directory_relative_path_name
+        .chars()
+        .next_back()
+        .filter(|separator| path_separators.all.contains(separator))
+        .unwrap_or(path_separators.main)
 }
 
 /// A path split into the parent path (the entire piece before the last separator) and the
