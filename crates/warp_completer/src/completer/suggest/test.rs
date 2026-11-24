@@ -2421,3 +2421,39 @@ pub fn test_alias_to_untyped_command_still_completes_paths() {
         vec!["custom/", "main/"]
     );
 }
+
+/// `tar -tf <file>`: `-f`'s ARCHIVE argument has no template in the bundled spec, so the only
+/// source of path completions is the file-path fallback. Reproduces the WSL report where the
+/// completion works on one machine and not another -- it depends entirely on whether the shell
+/// happens to answer, which varies by distro, shell-completion packages, and shell plugins.
+#[test]
+pub fn test_tar_dash_tf_completes_archive_paths_from_the_fallback() {
+    warp_core::features::mark_initialized();
+    let registry = CommandRegistry::default();
+    let pwd = TypedPathBuf::from(TEST_WORK_DIR);
+    let path_ctx = MockPathCompletionContext::new(pwd.clone())
+        .with_home_directory(TEST_WORK_DIR.to_owned())
+        .with_entries_in_pwd([
+            EngineDirEntry::test_file("magpie.tar.gz"),
+            EngineDirEntry::test_file("Cargo.lock"),
+        ]);
+
+    let ctx = FakeCompletionContext::new(registry)
+        .with_path_completion_context(path_ctx)
+        .with_top_level_commands(["tar"]);
+
+    // The bundled spec recognizes `-f ARCHIVE` but declares no type for it, so it contributes
+    // nothing here and the fallback has to answer.
+    assert_eq!(
+        complete_at_end_of_line("tar -tf m", &ctx),
+        vec!["magpie.tar.gz"]
+    );
+    assert_eq!(
+        complete_at_end_of_line_file_path_only("tar -tf m", &ctx),
+        vec!["magpie.tar.gz"]
+    );
+    assert_eq!(
+        complete_at_end_of_line("tar -tf ", &ctx),
+        vec!["Cargo.lock", "magpie.tar.gz"]
+    );
+}

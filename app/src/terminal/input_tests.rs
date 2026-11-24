@@ -4480,6 +4480,71 @@ fn directory_completion(name: &str) -> ShellCompletion {
     completion
 }
 
+/// A shell that answers with candidates which cannot match the token being completed leaves the
+/// menu empty exactly as an empty reply does, so the file-path fallback has to take over. This is
+/// the `tar -tf m` case in a WSL session: the bundled spec types nothing for `-f ARCHIVE`, and the
+/// shell's answer depends on the distro's completion packages, which is why the same keystroke
+/// worked on one machine and not another.
+#[test]
+fn native_completions_that_match_nothing_fall_back_to_file_paths() {
+    let _native_completions_flag = FeatureFlag::NativeShellCompletions.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        app.update(|ctx| {
+            InputSettings::handle(ctx).update(ctx, |settings, ctx| {
+                settings
+                    .warp_completions_enabled
+                    .set_value(true, ctx)
+                    .expect("Warp completions setting must update");
+                settings
+                    .native_shell_completions_enabled
+                    .set_value(true, ctx)
+                    .expect("native completions setting must update");
+            });
+        });
+
+        let working_directory = tempfile::TempDir::new().expect("completion working directory");
+        std::fs::write(working_directory.path().join("magpie.tar.gz"), "")
+            .expect("archive fixture must be created");
+
+        let session_info = SessionInfo::new_for_test();
+        let session_id = session_info.session_id;
+        let terminal =
+            add_window_with_bootstrapped_terminal(&mut app, None, Some(session_info)).await;
+        simulate_directory_for_completion(
+            session_id,
+            &terminal,
+            &mut app,
+            working_directory.path().to_string_lossy(),
+        );
+        respond_to_native_shell_completions(
+            &mut app,
+            &terminal,
+            vec![ShellCompletion::new(
+                "unrelated-shell-candidate".to_string(),
+            )],
+        );
+        let input = terminal.read(&app, |terminal, _| terminal.input().clone());
+
+        input.update(&mut app, |input, ctx| {
+            input.clear_buffer_and_reset_undo_stack(ctx);
+            input.user_insert("tar -tf mag", ctx);
+            input.input_tab(ctx);
+        });
+
+        assert_eventually!(
+            600 => input.read(&app, |input, ctx| input.buffer_text(ctx) != "tar -tf mag"),
+            "an unusable shell reply must not suppress the file-path fallback"
+        );
+        let text = input.read(&app, |input, ctx| input.buffer_text(ctx));
+        assert!(
+            text.starts_with("tar -tf magpie.tar.gz"),
+            "expected the archive path to be completed, got {text:?}"
+        );
+    });
+}
+
 #[test]
 fn input_tab_asks_the_shell_once_when_bundled_specs_are_empty() {
     let _native_completions_flag = FeatureFlag::NativeShellCompletions.override_enabled(true);

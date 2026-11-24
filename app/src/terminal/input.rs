@@ -394,6 +394,11 @@ impl DropTargetData for InputDropTargetData {
 
 pub const DEBOUNCE_INPUT_DECORATION_PERIOD: Duration = Duration::from_millis(10);
 pub const DEBOUNCE_AI_QUERY_PREDICTION_PERIOD: Duration = Duration::from_millis(250);
+
+/// How long to wait for a shell to answer a native-completions request before treating the reply
+/// as absent. The request is an in-band command, so a shell plugin that swallows it, or a session
+/// stuck behind a foreground process, would otherwise keep the menu from ever opening.
+const NATIVE_COMPLETION_REPLY_TIMEOUT: Duration = Duration::from_millis(1500);
 pub(super) const CLI_AGENT_RICH_INPUT_EDITOR_MAX_HEIGHT: f32 = 236.;
 pub(super) const CLI_AGENT_RICH_INPUT_EDITOR_TOP_PADDING: f32 = 10.;
 pub(super) const CLI_AGENT_RICH_INPUT_EDITOR_BOTTOM_PADDING: f32 = 8.;
@@ -1635,6 +1640,30 @@ fn resolve_completion_sources(
         && !is_ai_input;
 
     CompletionSources::resolve(warp_completions_enabled, native_shell_completions_eligible)
+}
+
+/// Whether a shell's native-completions reply can actually answer the query being completed.
+///
+/// A shell can reply with no candidates, fail to reply at all (the in-band request is dropped
+/// while the session is busy, or a shell plugin never reaches the completion widget), or reply
+/// with candidates that never match what the user typed. All three leave the menu empty, so they
+/// are treated alike and the file-path fallback gets a chance to answer.
+fn native_reply_answers_query(
+    native_suggestions: Option<&SuggestionResults>,
+    buffer_text: &str,
+    cursor_position: usize,
+    path_separators: &PathSeparators,
+) -> bool {
+    let Some(suggestions) = native_suggestions else {
+        return false;
+    };
+    let query = suggestions
+        .replacement_span
+        .slice(&buffer_text[0..cursor_position]);
+    suggestions
+        .filter_by_query(query, path_separators.all)
+        .next()
+        .is_some()
 }
 
 /// Builds [`SuggestionResults`] from a shell's native-completions reply.
@@ -12879,7 +12908,19 @@ impl Input {
                 buffer_text: buffer_text[0..cursor_position].to_owned(),
                 results_tx,
             });
-            async move { results_rx.recv().await.ok() }.boxed()
+            async move {
+                // A shell that never reaches its completion widget (a plugin swallowing the
+                // in-band command, a session busy with a foreground process) would otherwise leave
+                // the request pending forever and the menu never opens. Treat silence as an
+                // unusable reply so the file-path fallback can still answer.
+                results_rx
+                    .recv()
+                    .with_timeout(NATIVE_COMPLETION_REPLY_TIMEOUT)
+                    .await
+                    .ok()
+                    .and_then(Result::ok)
+            }
+            .boxed()
         } else {
             // If not, we can immediately say that there are no completion
             // results from the shell.
@@ -12906,7 +12947,17 @@ impl Input {
                                     )
                                 });
                         let suggestions = match native_suggestions {
-                            Some(suggestions) if suggestions.suggestions.is_empty() => {
+                            Some(suggestions)
+                                if native_reply_answers_query(
+                                    Some(&suggestions),
+                                    &buffer_text,
+                                    cursor_position,
+                                    &path_separators,
+                                ) =>
+                            {
+                                Some(suggestions)
+                            }
+                            _ => {
                                 completer::suggestions(
                                     before_cursor_text.as_str(),
                                     cursor_position,
@@ -12921,7 +12972,6 @@ impl Input {
                                 )
                                 .await
                             }
-                            suggestions => suggestions,
                         };
                         return (suggestions, completions_trigger, editor_snapshot);
                     }
@@ -12941,17 +12991,43 @@ impl Input {
 
                     let suggestions = match suggestions {
                         Some(s) if !s.suggestions.is_empty() => Some(s),
-                        _ => native_results_fut
-                            .await
-                            .map(|(results, shell_replacement_span)| {
-                                native_shell_suggestion_results(
-                                    results,
-                                    shell_replacement_span,
-                                    &buffer_text,
+                        _ => {
+                            let native_suggestions = native_results_fut.await.map(
+                                |(results, shell_replacement_span)| {
+                                    native_shell_suggestion_results(
+                                        results,
+                                        shell_replacement_span,
+                                        &buffer_text,
+                                        cursor_position,
+                                        &path_separators,
+                                    )
+                                },
+                            );
+                            if native_reply_answers_query(
+                                native_suggestions.as_ref(),
+                                &buffer_text,
+                                cursor_position,
+                                &path_separators,
+                            ) {
+                                native_suggestions
+                            } else {
+                                // Neither the bundled specs nor the shell could answer, so the
+                                // token is most likely a path the specs describe but don't type.
+                                completer::suggestions(
+                                    before_cursor_text.as_str(),
                                     cursor_position,
-                                    &path_separators,
+                                    session_env_vars.as_ref(),
+                                    CompleterOptions {
+                                        match_strategy: matcher,
+                                        fallback_strategy: CompletionsFallbackStrategy::FilePaths,
+                                        suggest_file_path_completions_only: true,
+                                        parse_quotes_as_literals: false,
+                                    },
+                                    &completion_context,
                                 )
-                            }),
+                                .await
+                            }
+                        }
                     };
 
                     (suggestions, completions_trigger, editor_snapshot)
@@ -13007,17 +13083,33 @@ impl Input {
         let abort_handle = ctx
             .spawn_abortable(
                 async move {
-                    let native_suggestions = results_rx.recv().await.ok().map(|(results, span)| {
-                        native_shell_suggestion_results(
-                            results,
-                            span,
-                            &buffer_text,
-                            cursor_position,
-                            &path_separators,
-                        )
-                    });
+                    let native_suggestions = results_rx
+                        .recv()
+                        .with_timeout(NATIVE_COMPLETION_REPLY_TIMEOUT)
+                        .await
+                        .ok()
+                        .and_then(Result::ok)
+                        .map(|(results, span)| {
+                            native_shell_suggestion_results(
+                                results,
+                                span,
+                                &buffer_text,
+                                cursor_position,
+                                &path_separators,
+                            )
+                        });
                     let suggestions = match native_suggestions {
-                        Some(suggestions) if suggestions.suggestions.is_empty() => {
+                        Some(suggestions)
+                            if native_reply_answers_query(
+                                Some(&suggestions),
+                                &buffer_text,
+                                cursor_position,
+                                &path_separators,
+                            ) =>
+                        {
+                            Some(suggestions)
+                        }
+                        _ => {
                             completer::suggestions(
                                 &buffer_text[..cursor_position],
                                 cursor_position,
@@ -13032,7 +13124,6 @@ impl Input {
                             )
                             .await
                         }
-                        suggestions => suggestions,
                     };
                     (suggestions, completions_trigger, editor_snapshot)
                 },
