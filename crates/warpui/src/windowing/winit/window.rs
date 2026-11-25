@@ -712,6 +712,13 @@ pub(super) struct Window {
     /// invisible title bar insofar as it triggers window dragging when clicked-and-dragged, or
     /// maximize/restore when double-clicked.
     titlebar_height: Cell<f32>,
+    /// The last size reported while the window was not minimized.
+    ///
+    /// Windows reports a minimized window's client area as a small but non-zero rect (160x28 on
+    /// Win11), which layout code cannot distinguish from a real resize: a `Resizable` clamps its
+    /// persisted width against the window size it is laid out with, so minimizing would silently
+    /// shrink every sidebar to its minimum and the width would still be wrong after restoring.
+    last_unminimized_size: Cell<Vector2F>,
     capture_callback: RefCell<Option<FrameCaptureCallback>>,
 }
 
@@ -722,6 +729,7 @@ impl Window {
             inner: Default::default(),
             scene: Default::default(),
             titlebar_height: Cell::new(DEFAULT_TITLEBAR_HEIGHT),
+            last_unminimized_size: Cell::new(Vector2F::zero()),
             capture_callback: RefCell::new(None),
         }
     }
@@ -1666,13 +1674,19 @@ impl crate::platform::Window for Window {
 impl platform::WindowContext for Window {
     fn size(&self) -> Vector2F {
         let scale_factor = self.backing_scale_factor() as f64;
-        self.inner
-            .borrow()
-            .as_ref()
-            .map_or(Vector2F::zero(), |inner| {
-                let size = inner.window.inner_size().to_logical::<f32>(scale_factor);
-                Vector2F::new(size.width, size.height)
-            })
+        let inner = self.inner.borrow();
+        let Some(inner) = inner.as_ref() else {
+            return Vector2F::zero();
+        };
+
+        let raw_size = inner.window.inner_size().to_logical::<f32>(scale_factor);
+        let (size, last_unminimized_size) = size_for_layout(
+            inner.window.is_minimized() == Some(true),
+            Vector2F::new(raw_size.width, raw_size.height),
+            self.last_unminimized_size.get(),
+        );
+        self.last_unminimized_size.set(last_unminimized_size);
+        size
     }
 
     fn origin(&self) -> Vector2F {
@@ -1743,6 +1757,36 @@ trait PhysicalSizeExt {
     fn to_vec2f(&self) -> Vector2F;
 }
 
+/// Picks the window size to lay out against, returning it alongside the value to remember as the
+/// last unminimized size.
+///
+/// A minimized window's client area is not a size anything should lay out against. Windows reports
+/// it as a small but non-zero rect (160x28 on Win11), which layout code cannot tell apart from a
+/// real resize — and a `Resizable` clamps its persisted width against the size it is laid out with,
+/// so minimizing would silently shrink every sidebar to its minimum and leave the width wrong after
+/// restoring.
+fn size_for_layout(
+    is_minimized: bool,
+    raw_size: Vector2F,
+    last_unminimized_size: Vector2F,
+) -> (Vector2F, Vector2F) {
+    if is_minimized {
+        let reported = if last_unminimized_size.x() > 0. && last_unminimized_size.y() > 0. {
+            last_unminimized_size
+        } else {
+            Vector2F::zero()
+        };
+        return (reported, last_unminimized_size);
+    }
+    if raw_size.x() > 0. && raw_size.y() > 0. {
+        return (raw_size, raw_size);
+    }
+    (raw_size, last_unminimized_size)
+}
+
+#[cfg(test)]
+#[path = "window_tests.rs"]
+mod tests;
 impl PhysicalSizeExt for PhysicalSize<u32> {
     fn to_vec2f(&self) -> Vector2F {
         let physical_size = self.cast::<f32>();
