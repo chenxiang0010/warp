@@ -972,6 +972,15 @@ impl TerminalModel {
     pub fn set_is_input_dirty(&mut self, value: bool) {
         self.is_input_dirty = value;
     }
+
+    /// Drops a partially received completions frame so the next one starts clean.
+    ///
+    /// A completions response that is abandoned mid-frame (its consumer timed out or the shell
+    /// never sent the end marker) would otherwise leave this state stuck in "receiving", and the
+    /// next response's leading `A` marker would be treated as the tail of the previous frame.
+    pub(crate) fn discard_completions_output(&mut self) {
+        self.is_receiving_completions_output = IsReceivingCompletionsOutput::No;
+    }
     #[cfg(any(test, feature = "test-util"))]
     #[allow(clippy::too_many_arguments)]
     /// Returns a bootstrapped `TerminalModel` with no restored blocks

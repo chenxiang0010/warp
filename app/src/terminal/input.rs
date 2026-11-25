@@ -12913,12 +12913,16 @@ impl Input {
                 // in-band command, a session busy with a foreground process) would otherwise leave
                 // the request pending forever and the menu never opens. Treat silence as an
                 // unusable reply so the file-path fallback can still answer.
-                results_rx
+                let result = results_rx
                     .recv()
                     .with_timeout(NATIVE_COMPLETION_REPLY_TIMEOUT)
                     .await
                     .ok()
-                    .and_then(Result::ok)
+                    .and_then(Result::ok);
+                // Closing the receiver tells the PTY controller this request is abandoned, so it
+                // stops treating the in-flight slot as occupied.
+                results_rx.close();
+                result
             }
             .boxed()
         } else {
@@ -13088,16 +13092,19 @@ impl Input {
                         .with_timeout(NATIVE_COMPLETION_REPLY_TIMEOUT)
                         .await
                         .ok()
-                        .and_then(Result::ok)
-                        .map(|(results, span)| {
-                            native_shell_suggestion_results(
-                                results,
-                                span,
-                                &buffer_text,
-                                cursor_position,
-                                &path_separators,
-                            )
-                        });
+                        .and_then(Result::ok);
+                    // See the `NativeOnly` branch above: closing the receiver releases the
+                    // controller's in-flight slot for this abandoned request.
+                    results_rx.close();
+                    let native_suggestions = native_suggestions.map(|(results, span)| {
+                        native_shell_suggestion_results(
+                            results,
+                            span,
+                            &buffer_text,
+                            cursor_position,
+                            &path_separators,
+                        )
+                    });
                     let suggestions = match native_suggestions {
                         Some(suggestions)
                             if native_reply_answers_query(
