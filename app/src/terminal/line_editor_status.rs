@@ -69,16 +69,18 @@ impl LineEditorStatus {
     }
 
     fn handle_model_event(&mut self, event: &ModelEvent, ctx: &mut ModelContext<Self>) {
-        let Some(active_session_id) = self.model_event_dispatcher.as_ref(ctx).active_session_id()
-        else {
-            return;
-        };
+        // Only the zsh branch below needs to know the shell, and it needs it for a *delay*
+        // decision. Bailing out of the whole handler when the active session is not resolvable
+        // would swallow the prompt hook instead: on a slow WSL start the precmd can arrive before
+        // the session is registered, and dropping it leaves the line editor inactive forever, so
+        // every write queued behind it is stranded and `is_user_command_executing` never clears.
+        let is_active_session_zsh = self
+            .model_event_dispatcher
+            .as_ref(ctx)
+            .active_session_id()
+            .and_then(|id| self.sessions.as_ref(ctx).get(id))
+            .is_some_and(|session| session.shell().shell_type() == ShellType::Zsh);
 
-        let Some(active_session) = self.sessions.as_ref(ctx).get(active_session_id) else {
-            return;
-        };
-
-        let is_active_session_zsh = active_session.shell().shell_type() == ShellType::Zsh;
         match event {
             ModelEvent::Handler(AnsiHandlerEvent::Precmd) => {
                 if is_active_session_zsh {
@@ -150,3 +152,7 @@ pub enum LineEditorStatusEvent {
 impl Entity for LineEditorStatus {
     type Event = LineEditorStatusEvent;
 }
+
+#[cfg(test)]
+#[path = "line_editor_status_tests.rs"]
+mod tests;

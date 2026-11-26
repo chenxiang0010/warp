@@ -13480,6 +13480,13 @@ impl TerminalView {
                     BlockMetadataUpdateSource::Precmd,
                     ctx,
                 );
+                // A user command submitted in the gap after a block completed but before this
+                // precmd arrived was held as pending rather than dropped. The `BlockCompleted`
+                // retry fires on a fixed delay and can miss a precmd that lands later (routine on
+                // WSL, where the prompt hook arrives in a separate read), so retry here too.
+                if !block_metadata_received_event.is_after_in_band_command {
+                    self.execute_pending_command((), ctx);
+                }
             }
             ModelEvent::BlockWorkingDirectoryUpdated(block_working_directory_updated_event) => {
                 self.apply_block_metadata_update(

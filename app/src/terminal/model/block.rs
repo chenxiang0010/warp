@@ -2810,6 +2810,13 @@ impl Block {
         self.precmd_state == PrecmdState::AfterPrecmd
     }
 
+    /// Puts the block back in the window between a completed command and the precmd that
+    /// populates it, so the "submit before precmd" path can be exercised in tests.
+    #[cfg(test)]
+    pub fn clear_precmd_for_test(&mut self) {
+        self.precmd_state = PrecmdState::BeforePrecmd;
+    }
+
     pub fn is_in_band_command_block(&self) -> bool {
         self.is_for_in_band_command
     }

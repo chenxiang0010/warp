@@ -210,6 +210,110 @@ fn pending_command_waits_for_final_bootstrap_precmd() {
 }
 
 #[test]
+fn command_submitted_before_precmd_is_retried_once_precmd_lands() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let terminal = add_window_with_bootstrapped_terminal(&mut app, None, None).await;
+        let input = terminal.read(&app, |view, _| view.input().clone());
+        let events = subscribe_to_execute_command_events(&mut app, &terminal);
+
+        // Finish bootstrapping, then put the *next* active block back in the gap between a
+        // completed block and the precmd that would populate it -- routine on WSL, where the
+        // prompt hook arrives in a later read.
+        let session_id = terminal.update(&mut app, |terminal, _| {
+            let mut model = terminal.model.lock();
+            let session_id = model.block_list().active_block().session_id().unwrap();
+            let completion_metadata = CompletionMetadata::default();
+            model.command_finished(CommandFinishedValue {
+                completion_metadata: completion_metadata.clone(),
+                session_id: Some(session_id.as_u64()),
+            });
+            model.precmd_with_completion_metadata(PrecmdValue {
+                completion_metadata,
+                prompt_metadata: PromptMetadata {
+                    session_id: Some(session_id.as_u64()),
+                    ..Default::default()
+                },
+            });
+            model
+                .block_list_mut()
+                .active_block_mut()
+                .clear_precmd_for_test();
+            session_id
+        });
+        assert!(!terminal.read(&app, |terminal, _| {
+            terminal
+                .model
+                .lock()
+                .block_list()
+                .active_block()
+                .has_received_precmd()
+        }));
+        assert!(terminal.read(&app, |terminal, _| {
+            terminal
+                .model
+                .lock()
+                .block_list()
+                .is_bootstrapping_precmd_done()
+        }));
+        assert!(events.borrow().is_empty());
+
+        // The retry re-reads the editor buffer, so the draft has to be there the way a real
+        // Enter leaves it (the buffer is only cleared on `BlockCompleted`).
+        let command = input.update(&mut app, |input, ctx| {
+            input.system_insert("echo after precmd", ctx);
+            input.buffer_text(ctx)
+        });
+        let executed = input.update(&mut app, |input, ctx| {
+            input.try_execute_command(&command, ctx)
+        });
+        assert!(
+            !executed,
+            "a command submitted in the precmd gap cannot run yet"
+        );
+        assert!(
+            input.read(&app, |input, _| input.has_pending_command()),
+            "the refused command should be held, not dropped"
+        );
+        assert!(events.borrow().is_empty());
+
+        terminal.update(&mut app, |terminal, ctx| {
+            // Applying the prompt metadata is what flips `has_received_precmd`; the real model
+            // then emits `BlockMetadataReceived` through its event proxy, which unit tests do not
+            // relay, so the view-level event is emitted explicitly here as well.
+            let block_index = {
+                let mut model = terminal.model.lock();
+                model.block_list_mut().prompt_only_precmd(PromptMetadata {
+                    session_id: Some(session_id.as_u64()),
+                    ..Default::default()
+                });
+                model.block_list().active_block_index()
+            };
+            terminal
+                .model_event_dispatcher()
+                .update(ctx, |dispatcher, ctx| {
+                    dispatcher.set_active_session_id(session_id);
+                    ctx.emit(ModelEvent::BlockMetadataReceived(
+                        BlockMetadataReceivedEvent {
+                            block_metadata: BlockMetadata::new(Some(session_id), None),
+                            block_index,
+                            is_after_in_band_command: false,
+                            is_done_bootstrapping: true,
+                        },
+                    ));
+                });
+        });
+
+        assert_eventually!(
+            600 => events.borrow().len() == 1,
+            "the held command should run once precmd lands"
+        );
+        assert_eq!(events.borrow()[0].0, "echo after precmd");
+        assert!(!input.read(&app, |input, _| input.has_pending_command()));
+    });
+}
+
+#[test]
 fn unshared_terminal_executes_command_locally() {
     App::test((), |mut app| async move {
         initialize_app(&mut app);

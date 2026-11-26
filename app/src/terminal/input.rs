@@ -1768,6 +1768,10 @@ pub struct Input {
     /// If true, will submit the command in the editor to the shell upon receiving the
     /// precmd message.
     has_pending_command: bool,
+    /// Set when a user command was refused only because the active block has not received precmd
+    /// yet. Distinguishes that retryable case from a permanent refusal (e.g. a shared-session
+    /// reader) so the pending flag is not left set forever.
+    awaiting_precmd_for_pending_command: bool,
     last_word_insertion: LastWordInsertion,
 
     ai_controller: ModelHandle<BlocklistAIController>,
@@ -4187,6 +4191,7 @@ impl Input {
             debounce_input_background_tx,
             debounce_ai_query_prediction_tx,
             has_pending_command: false,
+            awaiting_precmd_for_pending_command: false,
             last_word_insertion,
             decorations_future_handle: None,
             autosuggestions_abort_handle: None,
@@ -7755,6 +7760,7 @@ impl Input {
             // The draft was cleared while waiting for the shell to finish
             // bootstrapping; nothing left to run.
             self.has_pending_command = false;
+            self.awaiting_precmd_for_pending_command = false;
             return;
         }
 
@@ -7762,12 +7768,20 @@ impl Input {
             return;
         }
 
-        self.try_execute_command(&command, ctx);
-        self.has_pending_command = false;
+        // Keep the command pending when execution was refused because precmd has not landed yet;
+        // the next precmd retries it. Clearing unconditionally here would drop it silently.
+        if self.try_execute_command(&command, ctx) {
+            self.has_pending_command = false;
+            self.awaiting_precmd_for_pending_command = false;
 
-        self.editor.update(ctx, |editor, ctx| {
-            editor.set_interaction_state(InteractionState::Editable, ctx);
-        });
+            self.editor.update(ctx, |editor, ctx| {
+                editor.set_interaction_state(InteractionState::Editable, ctx);
+            });
+        } else if !self.awaiting_precmd_for_pending_command {
+            // A refusal that is not the precmd race is permanent for this submission (e.g. a
+            // shared-session reader); drop the pending flag rather than retrying forever.
+            self.has_pending_command = false;
+        }
     }
 
     /// Try to execute a command in the local session that was
@@ -8176,10 +8190,17 @@ impl Input {
             );
             did_execute = true;
         } else {
-            // We don't want to submit the command if precmd has not
-            // been received. Instead, we want the user to be aware
-            // that the prompt might not be up to date.
+            // We don't want to submit the command if precmd has not been received, because the
+            // active block's prompt metadata is stale. Dropping the command outright was worse:
+            // `can_execute_command` already said yes (the shell is bootstrapped), so this is the
+            // window between a block completing and the next precmd landing, which on WSL spans
+            // separate reads and is routinely wide enough for a user's next Enter to fall into.
+            // The buffer is only cleared on `BlockCompleted`, so the text is still here to retry.
             send_telemetry_from_ctx!(TelemetryEvent::TriedToExecuteBeforePrecmd, ctx);
+            if matches!(&source, CommandExecutionSource::User) && !command.is_empty() {
+                self.has_pending_command = true;
+                self.awaiting_precmd_for_pending_command = true;
+            }
             did_execute = false;
         }
 
